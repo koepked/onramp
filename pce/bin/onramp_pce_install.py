@@ -29,6 +29,8 @@ if __name__ == '__main__':
 
     tmpl_conf  = "bin/onramp_pce_config.cfg.tmpl"
     final_conf = "bin/onramp_pce_config.cfg"
+    pce_key_file = "src/keys/onramp_pce_key.pem"
+    pce_cert_file = "src/keys/onramp_pce_cert.pem"
     
     # If the PCE service is already deployed/installed
     if os.path.exists(env_dir):
@@ -59,9 +61,7 @@ if __name__ == '__main__':
         os.makedirs(job_state_dir)
 
     
-    #
     # Setup the configuration file(s)
-    #
     show_edit_msg = False
     if os.path.exists(final_conf) is True:
         print "=" * 70
@@ -78,15 +78,44 @@ if __name__ == '__main__':
         show_edit_msg = True
     call(['chmod', 'og+rX', final_conf])
 
+    # Setup SSL key and cert.
+    print "=" * 70
+    print 'SSL setup.'
+    ret_code = 0
+    ssl_error = False
+    call(['mkdir', 'src/keys'])
+    response = raw_input('(G)enerate SSL key/cert pair or (U)se existing? ')
 
+    if response == 'g' or response == 'G':
+        ret_code = call(['openssl', 'genrsa', '-out', pce_key_file, '2048'])
 
-    ###################################################
+        if ret_code == 0:
+            ret_code = call(['openssl', 'req', '-new', '-x509', '-days', '365',
+                             '-key', pce_key_file, '-out', pce_cert_file])
+
+    elif response == 'u' or response == 'U':
+        response = raw_input('Location of key file (Leave blank for %s): '
+                             % pce_key_file)
+        if not response == "":
+            ret_code = call(['cp', response, pce_key_file])
+
+        if ret_code == 0:
+            response = raw_input('Location of cert file (Leave blank for %s): '
+                                 % pce_cert_file)
+        if not response == "":
+            ret_code = call(['cp', response, pce_cert_file])
+
+    if (not os.path.isfile(pce_key_file) or
+        not os.path.isfile(pce_cert_file) or
+        not ret_code == 0):
+        ssl_error = True
+
+    # Setup virtual environment
     print "=" * 70
     print "Status: Setup the virtual environment"
     print "        This may take a while..."
     print "=" * 70
 
-    # Setup virtual environment
     call(['virtualenv', '-p', 'python2.7', env_dir])
     call([env_dir + '/bin/pip', 'install', '-r', source_dir + '/requirements.txt'])
     
@@ -106,12 +135,20 @@ if __name__ == '__main__':
     # Use virtual environment to complete server setup
     call([env_dir + '/bin/python', source_dir + '/stage_two.py'])
 
-    ###################################################
     print "=" * 70
-    print "Status: Setup Complete"
+    if show_edit_msg or ssl_error:
+        print "Status: Action required"
+    else:
+        print "Status: Setup Complete"
     print "=" * 70
 
+    if ssl_error:
+        print ("- SSL configuration errors exist. Run "
+               "'bin/onramp_pce_service.py updatessl' to fix.")
     if show_edit_msg:
-        print "==>"
-        print "==> NOTICE: Please edit the file: " + final_conf
-        print "==>"
+        print "- The OnRamp PCE config file %s should be edited." % final_conf
+    else:
+        print ("- The OnRamp PCE server can be started by running "
+               "bin/onramp_pce_service.py start")
+    if show_edit_msg or ssl_error:
+        print "=" * 70
