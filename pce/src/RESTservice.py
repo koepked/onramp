@@ -55,6 +55,9 @@ if __name__ == '__main__':
     conf = {
         'global': {
             'server.socket_host': socket.gethostbyname(socket.gethostname()),
+            'server.ssl_module': 'builtin',
+            'server.ssl_certificate': '/home/dan/onramp/pce/src/keys/onramp_pce_cert.pem',
+            'server.ssl_private_key': '/home/dan/onramp/pce/src/keys/onramp_pce_key.pem',
             'log.access_file': 'log/access.log',
             'log.error_file': 'log/cherrypy_error.log',
             'log.screen': False,
