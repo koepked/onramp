@@ -8,6 +8,8 @@ import os
 import requests
 import time
 
+requests.packages.urllib3.contrib.pyopenssl.inject_into_urllib3()
+
 class PCEAccess():
     """Client-side interface to OnRamp PCE server.
 
