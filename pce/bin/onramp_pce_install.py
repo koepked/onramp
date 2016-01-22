@@ -83,7 +83,7 @@ if __name__ == '__main__':
     print 'SSL setup.'
     ret_code = 0
     ssl_error = False
-    call(['mkdir', 'src/keys'])
+    call(['mkdir', '-p', 'src/keys'])
     response = raw_input('(G)enerate SSL key/cert pair or (U)se existing? ')
 
     if response == 'g' or response == 'G':

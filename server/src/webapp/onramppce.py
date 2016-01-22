@@ -60,7 +60,7 @@ class PCEAccess():
         # Get the PCE server information
         #
         pce_info = self._db.pce_get_info(pce_id)
-        self._url = "http://%s:%d" % (pce_info['data'][2], pce_info['data'][3])
+        self._url = "https://%s:%d" % (pce_info['data'][2], pce_info['data'][3])
 
 
     def _pce_get(self, endpoint, raw=False, **kwargs):
@@ -81,7 +81,8 @@ class PCEAccess():
         """
         s = requests.Session()
         url = "%s/%s/" % (self._url, endpoint)
-        r = s.get(url, params=kwargs)
+        r = s.get(url, params=kwargs,
+                  verify='/home/dan/onramp/server/src/onramp_pce_cert.pem')
 
         if r.status_code != 200:
             self._logger.error('%s Error: %d from GET %s: %s'
@@ -113,7 +114,8 @@ class PCEAccess():
         url = "%s/%s/" % (self._url, endpoint)
         data = json.dumps(kwargs)
         headers = {"content-type": "application/json"}
-        r = s.post(url, data=data, headers=headers)
+        r = s.post(url, data=data, headers=headers,
+                   verify='/home/dan/onramp/server/src/onramp_pce_cert.pem')
 
         if r.status_code != 200:
             self._logger.error('%s Error: %d from POST %s: %s'
@@ -140,7 +142,8 @@ class PCEAccess():
         """
         s = requests.Session()
         url = "%s/%s/" % (self._url, endpoint)
-        r = s.delete(url)
+        r = s.delete(url,
+                     verify='/home/dan/onramp/server/src/onramp_pce_cert.pem')
 
         if r.status_code != 200:
             self._logger.error('%s Error: %d from DELETE %s: %s'
@@ -749,7 +752,7 @@ if __name__ == '__main__':
         logging.Formatter('[%(asctime)s] %(levelname)s %(message)s'))
     logger.addHandler(handler)
 
-    pce = PCEAccess(logger, Dummy(logger), 1)
+    pce = PCEAccess(logger, Dummy(logger), 1, '~/tmp/onramp')
     print 'Connection'
     print pce.establish_connection()
     print 'Available mods'
@@ -784,6 +787,7 @@ if __name__ == '__main__':
     print ready_mods
     print 'Individual module'
     print pce.get_modules(1)
+    sys.exit(0)
     print 'Launching jobs...'
     job_attrs = {
         'onramp': {'np': 2, 'nodes': 1},
