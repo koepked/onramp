@@ -8,6 +8,11 @@ import os
 import requests
 import time
 
+# The stdlib's ssl module has some limitations which are adressed by PyOpenSSL.
+# The following gets the requests lib to get the urllib3 lib to use PyOpenSSL
+# bindings instead.
+#
+# Reference: https://urllib3.readthedocs.org/en/latest/security.html#pyopenssl
 requests.packages.urllib3.contrib.pyopenssl.inject_into_urllib3()
 
 class PCEAccess():
