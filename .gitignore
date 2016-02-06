@@ -24,6 +24,7 @@ pce/src/state
 pce/src/keys
 pce/docs/build
 pce/bin/onramp_pce_config.cfg
+*.pem
 
 server/tmp
 server/tmp/users

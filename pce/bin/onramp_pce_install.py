@@ -31,6 +31,7 @@ if __name__ == '__main__':
     final_conf = "bin/onramp_pce_config.cfg"
     pce_key_file = "src/keys/onramp_pce_key.pem"
     pce_cert_file = "src/keys/onramp_pce_cert.pem"
+    pce_openssl_conf_file =  "src/openssl.cnf"
     
     # If the PCE service is already deployed/installed
     if os.path.exists(env_dir):
@@ -91,7 +92,8 @@ if __name__ == '__main__':
 
         if ret_code == 0:
             ret_code = call(['openssl', 'req', '-new', '-x509', '-days', '365',
-                             '-key', pce_key_file, '-out', pce_cert_file])
+                             '-key', pce_key_file, '-out', pce_cert_file,
+                             '-config', pce_openssl_conf_file])
 
     elif response == 'u' or response == 'U':
         response = raw_input('Location of key file (Leave blank for %s): '
