@@ -89,7 +89,7 @@ class PCEAccess():
         s = requests.Session()
         url = "%s/%s/" % (self._url, endpoint)
         r = s.get(url, params=kwargs,
-                  verify='/home/dan/onramp/server/src/onramp_pce_cert.pem')
+                  verify='/home/dan/onramp/server/src/onramp_pce.crt')
 
         if r.status_code != 200:
             self._logger.error('%s Error: %d from GET %s: %s'
@@ -122,7 +122,7 @@ class PCEAccess():
         data = json.dumps(kwargs)
         headers = {"content-type": "application/json"}
         r = s.post(url, data=data, headers=headers,
-                   verify='/home/dan/onramp/server/src/onramp_pce_cert.pem')
+                   verify='/home/dan/onramp/server/src/onramp_pce.crt')
 
         if r.status_code != 200:
             self._logger.error('%s Error: %d from POST %s: %s'
@@ -150,7 +150,7 @@ class PCEAccess():
         s = requests.Session()
         url = "%s/%s/" % (self._url, endpoint)
         r = s.delete(url,
-                     verify='/home/dan/onramp/server/src/onramp_pce_cert.pem')
+                     verify='/home/dan/onramp/server/src/onramp_pce.crt')
 
         if r.status_code != 200:
             self._logger.error('%s Error: %d from DELETE %s: %s'
