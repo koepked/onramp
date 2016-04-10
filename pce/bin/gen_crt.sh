@@ -4,7 +4,7 @@ PCE_KEY_FILE=src/keys/onramp_pce.key
 PCE_CERT_FILE=src/keys/onramp_pce.crt
 PCE_OPENSSL_CONF=src/openssl.cnf
 PCE_CERT_DAYS=365
-PCE_PERMISSION=400
+PCE_PERMISSION=600
 PCE_ALG=rsa
 PCE_BITS=2048
 
