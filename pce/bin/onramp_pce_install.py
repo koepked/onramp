@@ -30,10 +30,8 @@ if __name__ == '__main__':
     tmpl_conf  = "bin/onramp_pce_config.cfg.tmpl"
     final_conf = "bin/onramp_pce_config.cfg"
     pce_key_file = "src/keys/onramp_pce.key"
-    pce_cert_sig_req_file = "src/keys/onramp_pce.csr"
     pce_cert_file = "src/keys/onramp_pce.crt"
-    pce_openssl_conf =  "src/openssl.cnf"
-    num_days_cert_valid = 365
+    cert_gen_script = "bin/gen_crt.sh"
     
     # If the PCE service is already deployed/installed
     if os.path.exists(env_dir):
@@ -90,10 +88,7 @@ if __name__ == '__main__':
     response = raw_input('(G)enerate SSL key/cert pair or (U)se existing? ')
 
     if response == 'g' or response == 'G':
-        ret_code = call(['openssl', 'req', '-newkey',  'rsa:2048', '-sha256',
-                         '-keyout',  pce_key_file, '-nodes', '-x509',
-                         '-config', pce_openssl_conf, '-out', pce_cert_file,
-                         '-days', str(num_days_cert_valid)])
+        ret_code = call([cert_gen_script])
         if ret_code != 0:
             sys.exit('FAIL: Error generating self signed certificate')
 
