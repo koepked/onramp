@@ -18,6 +18,8 @@ pce/users
 pce/modules
 pce/log
 pce/src/env
+pce/src/pce_client.pwd
+pce/src/pwd.lock
 pce/src/.*.pid
 pce/src/testing/deploy
 pce/src/state
