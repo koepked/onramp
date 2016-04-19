@@ -5,8 +5,11 @@ Exports:
 """
 import json
 import os
+import pexpect
 import requests
 import time
+
+from webapp_helper import server_root
 
 # The stdlib's ssl module has some limitations which are adressed by PyOpenSSL.
 # The following gets the requests lib to get the urllib3 lib to use PyOpenSSL
@@ -37,7 +40,8 @@ class PCEAccess():
     _pce_dir = ""
     _pce_module_dir = ""
     _pce_job_dir = ""
-
+    _cert_dir = "src/certs"
+    
     def __init__(self, logger, dbaccess, pce_id, tmp_dir):
         """Initialize PCEAccess instance.
 
@@ -68,7 +72,6 @@ class PCEAccess():
         #
         pce_info = self._db.pce_get_info(pce_id)
         self._url = "https://%s:%d" % (pce_info['data'][2], pce_info['data'][3])
-
 
     def _pce_get(self, endpoint, raw=False, **kwargs):
         """Execute GET request to PCE endpoint.
@@ -162,6 +165,32 @@ class PCEAccess():
                 or (0 != response['status_code'])):
                 return False
             return True
+
+    def attach(self, hostname, port, unix_user, unix_password, onramp_base_dir):
+        while onramp_base_dir.endswith('/'):
+            onramp_base_dir = onramp_base_dir[:-1]
+        if not onramp_base_dir.endswith('onramp'):
+            return (-1, 'Bad onramp_base_dir: Should end with "onramp"')
+
+        command = ('scp '
+            '-o PreferredAuthentications=password '
+            '-o PubkeyAuthentication=no '
+            '-P %d '
+            '%s@%s:%s'
+            '/pce/src/keys/onramp_pce.crt '
+            '%s'
+            % (port, unix_user, hostname, onramp_base_dir,
+               os.path.join(server_root, self._cert_dir,
+                            '%d.crt' % self._pce_id))
+        )
+
+        child = pexpect.spawn(command)
+        result = child.expect(['Password:', 'password:'])
+        if result == 0 or result == 1:
+            child.sendline(unix_password)
+            child.read()
+        else:
+            return (-2, 'Unexpected output when attempting to transfer cert')
 
     def get_modules_avail(self):
         """Return the list of modules that are available at the PCE but not
@@ -720,15 +749,20 @@ class PCEAccess():
 
 if __name__ == '__main__':
 
+    import sys
     import logging
     import sys
     import time
 
     if len(sys.argv) < 3:
-        sys.exit('usage: python onramppce.py IP_ADDRESS PORT')
+        sys.exit('usage: python onramppce.py IP_ADDRESS PORT USERNAME PASSWORD ONRAMP_DIR')
     class Dummy:
         _ip_addr = sys.argv[1]
         _port = int(sys.argv[2])
+        _username = sys.argv[3]
+        _password = sys.argv[4]
+        _onramp_dir = sys.argv[5]
+
         def __init__(self, logger):
             self.logger = logger
 
@@ -760,6 +794,9 @@ if __name__ == '__main__':
     logger.addHandler(handler)
 
     pce = PCEAccess(logger, Dummy(logger), 1, '~/tmp/onramp')
+    pce.attach(_ip_addr, _port, _username, _password, _onramp_dir)
+    sys.exit(0)
+
     print 'Connection'
     print pce.establish_connection()
     print 'Available mods'
