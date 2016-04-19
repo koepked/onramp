@@ -117,6 +117,14 @@ cwd = os.getcwd()
 call(['cp', '-rs', cwd + '/' + source_dir + '/' + package_name,
       env_dir + '/lib/python2.7/site-packages/' + package_name])
 
+# Create webapp_helper module in virtual environment
+mod_dir = os.path.join(env_dir, 'lib', 'python2.7', 'site-packages',
+                        'webapp_helper')
+mod_file = os.path.join(mod_dir, '__init__.py')
+os.mkdir(mod_dir)
+with open(mod_file, 'w') as f:
+    print>>f, "server_root = '%s'\n" % cwd
+
 # Use virtual environment to complete server setup
 call([env_dir + '/bin/python', source_dir + '/onramp_server_install_stage_two.py'])
 
