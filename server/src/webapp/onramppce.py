@@ -754,8 +754,15 @@ if __name__ == '__main__':
     import sys
     import time
 
-    if len(sys.argv) < 3:
+    if len(sys.argv) < 6:
         sys.exit('usage: python onramppce.py IP_ADDRESS PORT USERNAME PASSWORD ONRAMP_DIR')
+
+    _ip_addr = sys.argv[1]
+    _port = int(sys.argv[2])
+    _username = sys.argv[3]
+    _password = sys.argv[4]
+    _onramp_dir = sys.argv[5]
+
     class Dummy:
         _ip_addr = sys.argv[1]
         _port = int(sys.argv[2])

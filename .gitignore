@@ -36,4 +36,4 @@ server/src/env
 server/src/.*.pid
 server/bin/onramp_server_config.cfg
 server/.htaccess
-server/src/onramp_pce.crt
+server/src/certs
