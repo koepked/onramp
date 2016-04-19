@@ -18,6 +18,7 @@ package_name = 'webapp'
 
 source_dir = 'src'
 log_dir = 'log'
+cert_dir = os.path.join(source_dir, 'certs')
 tmp_dir = 'tmp'
 
 env_dir = source_dir + '/env'
@@ -58,6 +59,11 @@ print "=" * 70
 if not os.path.exists(log_dir):
     os.makedirs(log_dir)
 
+#
+# Create the cert directory
+#
+if not os.path.exists(cert_dir):
+    os.makedirs(cert_dir)
 
 #
 # Create the base temporary directories
