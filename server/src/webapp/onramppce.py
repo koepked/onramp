@@ -18,6 +18,19 @@ from webapp_helper import server_root
 # Reference: https://urllib3.readthedocs.org/en/latest/security.html#pyopenssl
 requests.packages.urllib3.contrib.pyopenssl.inject_into_urllib3()
 
+
+# Some (all?) exceptions from the requests lib do not stick to typical exception
+# attrs (https://github.com/kennethreitz/requests/issues/3004), thus, this is
+# needed.
+def get_requests_err_msg(ex):
+    error_number = None
+    current_error = ex
+    while isinstance(current_error, Exception) and error_number is None:
+        error_number = getattr(current_error, 'errno', None)
+        current_error = current_error.args[0]
+
+    return current_error
+
 class PCEAccess():
     """Client-side interface to OnRamp PCE server.
 
@@ -73,7 +86,7 @@ class PCEAccess():
         pce_info = self._db.pce_get_info(pce_id)
         self._url = "https://%s:%d" % (pce_info['data'][2], pce_info['data'][3])
 
-    def _pce_get(self, endpoint, raw=False, **kwargs):
+    def _pce_get(self, endpoint, **kwargs):
         """Execute GET request to PCE endpoint.
 
         Args:
@@ -91,16 +104,22 @@ class PCEAccess():
         """
         s = requests.Session()
         url = "%s/%s/" % (self._url, endpoint)
-        r = s.get(url, params=kwargs,
-                  verify='/home/dan/onramp/server/src/onramp_pce.crt')
+
+        try:
+            r = s.get(url, params=kwargs, verify=self._get_cert_filename())
+        except requests.exceptions.SSLError as e:
+            msg = get_requests_err_msg(e)
+            if msg.startswith('bad ca_certs'):
+                return self._build_status_from_err(msg)
+            raise
 
         if r.status_code != 200:
+            err_msg = ('%s Error: %d from GET %s: %s'
+                       % (self._name, r.status_code, url, r.text))
             self._logger.error('%s Error: %d from GET %s: %s'
                                % (self._name, r.status_code, url, r.text))
-            return None
+            return {'status_code': -11, 'status_msg': err_msg}
         else:
-            if raw:
-                return r
             return r.json()
 
     def _pce_post(self, endpoint, **kwargs):
@@ -124,8 +143,14 @@ class PCEAccess():
         url = "%s/%s/" % (self._url, endpoint)
         data = json.dumps(kwargs)
         headers = {"content-type": "application/json"}
-        r = s.post(url, data=data, headers=headers,
-                   verify='/home/dan/onramp/server/src/onramp_pce.crt')
+        try:
+            r = s.post(url, data=data, headers=headers,
+                       verify=self._get_cert_filename())
+        except requests.exceptions.SSLError as e:
+            msg = get_requests_err_msg(e)
+            if msg.startswith('bad ca_certs'):
+                return self._build_status_from_err(msg)
+            raise
 
         if r.status_code != 200:
             self._logger.error('%s Error: %d from POST %s: %s'
@@ -152,8 +177,13 @@ class PCEAccess():
         """
         s = requests.Session()
         url = "%s/%s/" % (self._url, endpoint)
-        r = s.delete(url,
-                     verify='/home/dan/onramp/server/src/onramp_pce.crt')
+        try:
+            r = s.delete(url, verify=self._get_cert_filename())
+        except requests.exceptions.SSLError as e:
+            msg = get_requests_err_msg(e)
+            if msg.startswith('bad ca_certs'):
+                return self._build_status_from_err(msg)
+            raise
 
         if r.status_code != 200:
             self._logger.error('%s Error: %d from DELETE %s: %s'
@@ -166,7 +196,21 @@ class PCEAccess():
                 return False
             return True
 
-    def attach(self, hostname, port, unix_user, unix_password,
+    # Some (all?) exceptions from the requests lib do not stick to typical
+    # exception attrs (https://github.com/kennethreitz/requests/issues/3004),
+    # thus, this is needed.
+    def _build_status_from_err(self, msg):
+        errno = -10
+        errmsg = 'SSL Certificate Error'
+        missing_filename = msg.split("bad ca_certs: '")[1].split("'")[0]
+        self._logger.error('%s Error: %s: File: %s'
+                           % (self._name, errmsg, missing_filename))
+        return {'status_code': errno, 'status_msg': errmsg}
+
+    def _get_cert_filename(self):
+        return os.path.join(server_root, self._cert_dir, '%d.crt' % self._pce_id)
+
+    def attach(self, hostname, ssh_port, unix_user, unix_password,
                onramp_base_dir=None):
 
         if not onramp_base_dir:
@@ -178,23 +222,37 @@ class PCEAccess():
             return (-1, 'Bad onramp_base_dir: Should end with "onramp"')
 
         command = ('scp '
-            '-o PreferredAuthentications=password '
-            '-o PubkeyAuthentication=no '
             '-o StrictHostKeyChecking=no '
             '-P %d '
             '%s@%s:%s'
             '/pce/src/keys/onramp_pce.crt '
             '%s'
-            % (port, unix_user, hostname, onramp_base_dir,
+            % (ssh_port, unix_user, hostname, onramp_base_dir,
                os.path.join(server_root, self._cert_dir,
                             '%d.crt' % self._pce_id))
         )
-
+        
         child = pexpect.spawn(command)
-        result = child.expect(['Password:', 'password:'])
-        if result == 0 or result == 1:
+        result = child.expect(['Password:', 'password:', 'Enter passphrase',
+                               'onramp_pce.crt'])
+
+        if result in [0,1,2]:
             child.sendline(unix_password)
+            result = child.expect(['onramp_pce.crt', 'Password:', 'password:',
+                                   'Enter passphrase'])
+
+            if result == 0:
+                child.read()
+                return (0, 'Success')
+            if result in [1,2,3]:
+                return (-3, 'Incorrect username/password given')
+            else:
+                return (-2, 'Unexpected output when attempting to transfer cert')
+
+        elif result == 3:
             child.read()
+            return (0, 'Success')
+
         else:
             return (-2, 'Unexpected output when attempting to transfer cert')
 
@@ -352,10 +410,13 @@ class PCEAccess():
         """Ping the given PCE.
 
         Returns:
-            HTTP response code from PCE ping request.
+            True if able to succesfully connect via HTTP.
+            False otherwise.
         """
         endpoint = "cluster/ping"
-        return self._pce_get(endpoint, raw=True).status_code
+        result = self._pce_get(endpoint)
+        return result['status_code'] == 0
+
 
     def check_connection(self):
         """Ping the server to see if it still available. Record status in given
@@ -364,12 +425,12 @@ class PCEAccess():
         Returns:
             True if connected, False if not.
         """
-        status_code = self.ping()
+        good_ping = self.ping()
 
-        self._logger.debug("%scheck_connection() %d from %s"
-                           % (self._name, status_code, self._url))
+        self._logger.debug("%scheck_connection() %r from %s"
+                           % (self._name, good_ping, self._url))
 
-        if status_code == 200:
+        if good_ping:
             self._db.pce_update_state( self._pce_id, 0 ) # see onrampdb.py
             return True
         else:
@@ -806,9 +867,10 @@ if __name__ == '__main__':
         logging.Formatter('[%(asctime)s] %(levelname)s %(message)s'))
     logger.addHandler(handler)
 
-    pce = PCEAccess(logger, Dummy(logger), 1, '~/tmp/onramp')
-    pce.attach(_ip_addr, _port, _username, _password, _onramp_dir)
-    sys.exit(0)
+    pce = PCEAccess(logger, Dummy(logger), 1, os.path.expanduser('~/tmp/onramp'))
+    (result, msg) = pce.attach(_ip_addr, 871, _username, _password, _onramp_dir)
+    if result != 0:
+        print msg
 
     print 'Connection'
     print pce.establish_connection()
