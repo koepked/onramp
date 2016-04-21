@@ -9,6 +9,7 @@ import pexpect
 import requests
 import time
 
+from pexpect import pxssh
 from webapp_helper import server_root
 
 # The stdlib's ssl module has some limitations which are adressed by PyOpenSSL.
@@ -55,7 +56,8 @@ class PCEAccess():
     _pce_job_dir = ""
     _cert_dir = "src/certs"
     
-    def __init__(self, logger, dbaccess, pce_id, tmp_dir):
+    def __init__(self, logger, dbaccess, pce_id, tmp_dir, servername, username,
+                 password):
         """Initialize PCEAccess instance.
 
         Args:
@@ -67,6 +69,9 @@ class PCEAccess():
         self._logger = logger
         self._db     = dbaccess
         self._pce_id = int(pce_id)
+        self._servername = servername
+        self._username = username
+        self._password = password
 
         self._tmp_dir = tmp_dir
         self._pce_dir = os.path.join(self._tmp_dir, "tmp", "pce", str(self._pce_id))
@@ -210,7 +215,7 @@ class PCEAccess():
     def _get_cert_filename(self):
         return os.path.join(server_root, self._cert_dir, '%d.crt' % self._pce_id)
 
-    def attach(self, hostname, ssh_port, unix_user, unix_password,
+    def retrieve_cert(self, hostname, ssh_port, unix_user, unix_password,
                onramp_base_dir=None):
 
         if not onramp_base_dir:
@@ -221,6 +226,7 @@ class PCEAccess():
         if not onramp_base_dir.endswith('onramp'):
             return (-1, 'Bad onramp_base_dir: Should end with "onramp"')
 
+        # Retrieve SSL cert from PCE.
         command = ('scp '
             '-o StrictHostKeyChecking=no '
             '-P %d '
@@ -231,10 +237,9 @@ class PCEAccess():
                os.path.join(server_root, self._cert_dir,
                             '%d.crt' % self._pce_id))
         )
-        
         child = pexpect.spawn(command)
         result = child.expect(['Password:', 'password:', 'Enter passphrase',
-                               'onramp_pce.crt'])
+                               'onramp_pce.crt', 'Connection refused'])
 
         if result in [0,1,2]:
             child.sendline(unix_password)
@@ -243,18 +248,69 @@ class PCEAccess():
 
             if result == 0:
                 child.read()
-                return (0, 'Success')
-            if result in [1,2,3]:
+            elif result in [1,2,3]:
                 return (-3, 'Incorrect username/password given')
             else:
                 return (-2, 'Unexpected output when attempting to transfer cert')
 
         elif result == 3:
             child.read()
-            return (0, 'Success')
+        elif result == 4:
+            return (-4, 'Connection refused')
 
         else:
             return (-2, 'Unexpected output when attempting to transfer cert')
+
+        return (0, 'Success')
+
+    def register_client(self, hostname, ssh_port, unix_user, unix_password,
+               onramp_base_dir=None):
+
+        if not onramp_base_dir:
+            onramp_base_dir = '/home/%s/onramp' % unix_user
+        while onramp_base_dir.endswith('/'):
+            onramp_base_dir = onramp_base_dir[:-1]
+        if not onramp_base_dir.endswith('onramp'):
+            return (-1, 'Bad onramp_base_dir: Should end with "onramp"')
+
+        child = pxssh.pxssh()
+        try:
+            child.login(hostname, unix_user, unix_password, port=ssh_port)
+            child.sendline('cd %s/pce' % onramp_base_dir)
+            child.prompt()
+            child.before
+            child.sendline('bin/onramp_pce_service.py addclient %s %s'
+                           % (self._servername, self._username))
+            result = child.expect([
+                'Password:',
+                ('Servername/Username pair "%s/%s" already configured for '
+                    'client access' % (self._servername, self._username)),
+                'Client password file "src/pce_client.pwd" has been corrupted'
+            ])
+            if result == 1:
+                child.logout()
+                return (-2, '%s/%s already configured for client access'
+                            % (self._servername, self._username))
+            if result == 2:
+                child.logout()
+                return (-3, 'PCE user registration sys error')
+
+            child.sendline(self._password)
+            child.expect('Verify Password:')
+            child.sendline(self._password)
+            result = child.expect([child.PROMPT, 'Password verification failed'])
+            if result == 1:
+                child.logout()
+                return (-4, 'Registration info transfer error')
+        except pexpect.exceptions.EOF:
+            child.logout()
+            return (-5, 'Incorrect connection/auth attrs given')
+        except pexpect.exceptions.TIMEOUT:
+            child.logout()
+            return (-6, 'Unknown error occured during user registration')
+            
+        child.logout()
+        return (0, 'Success')
 
     def get_modules_avail(self):
         """Return the list of modules that are available at the PCE but not
@@ -922,10 +978,19 @@ if __name__ == '__main__':
         logging.Formatter('[%(asctime)s] %(levelname)s %(message)s'))
     logger.addHandler(handler)
 
-    pce = PCEAccess(logger, Dummy(logger), 1, os.path.expanduser('~/tmp/onramp'))
-    (result, msg) = pce.attach(_ip_addr, 871, _username, _password, _onramp_dir)
+    pce = PCEAccess(logger, Dummy(logger), 1,
+                    os.path.expanduser('~/tmp/onramp'),'testserver', 'dan',
+                    'pa55w0rd')
+    (result, msg) = pce.retrieve_cert(_ip_addr, 22, _username, _password,
+                                      _onramp_dir)
     if result != 0:
         print msg
+
+    (result, msg) = pce.register_client(_ip_addr, 22, _username, _password,
+                                        _onramp_dir)
+    if result != 0:
+        print msg
+    sys.exit(0)
 
     print 'Connection'
     print pce.establish_connection()
