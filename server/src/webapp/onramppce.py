@@ -69,9 +69,9 @@ class PCEAccess():
         self._pce_id = int(pce_id)
 
         self._tmp_dir = tmp_dir
-        self._pce_dir = self._tmp_dir + "tmp/pce/" + str(self._pce_id) + "/"
-        self._pce_module_dir = self._pce_dir + "/modules/"
-        self._pce_job_dir = self._pce_dir + "/jobs/"
+        self._pce_dir = os.path.join(self._tmp_dir, "tmp", "pce", str(self._pce_id))
+        self._pce_module_dir = os.path.join(self._pce_dir, "modules")
+        self._pce_job_dir = os.path.join(self._pce_dir, "jobs")
 
         if not os.path.exists(self._pce_dir):
             os.makedirs(self._pce_dir)
@@ -526,13 +526,13 @@ class PCEAccess():
         if output is None:
             return True
 
-        job_dir = self._pce_job_dir + "/" + str(job_id) + "/"
+        job_dir = os.path.join(self._pce_job_dir, str(job_id))
 
         if not os.path.exists(job_dir):
             os.makedirs(job_dir)
 
         # Write it out
-        output_file = job_dir + "output.txt"
+        output_file = os.path.join(job_dir, "output.txt")
         with open(output_file, 'w') as f:
             f.write(output)
 
@@ -542,35 +542,50 @@ class PCEAccess():
         prefix = ("%sget_job_output(%s)" % (self._name, str(job_id)))
         self._logger.debug("%s load Job output: %s" % (prefix, str(job_id)))
 
-        job_dir = self._pce_job_dir + "/" + str(job_id) + "/"
+        job_dir = os.path.join(self._pce_job_dir, str(job_id))
 
         if not os.path.exists(job_dir):
             return None
 
-        output_file = job_dir + "output.txt"
-        output = ""
-        with open(output_file) as f:
-            for line in f:
-                output += line
+        # need relative job dir to server location
+        abs_output_file = os.path.join(job_dir, "output.txt")
+        rel_output_file = os.path.relpath(abs_output_file, self._tmp_dir)
 
-        return output
+        return rel_output_file
 
 
     def _save_uioptions(self, module_id, module_options):
         prefix = ("%ssave_uioptions(%s)" % (self._name, str(module_id)))
         self._logger.debug("%s Updating UI Options: %s" % (prefix, str(module_options)))
 
-        module_dir = self._pce_module_dir + "/" + str(module_id) + "/"
+        module_dir = os.path.join(self._pce_module_dir, str(module_id))
 
         if not os.path.exists(module_dir):
             os.makedirs(module_dir)
 
         # Write it out to a file
-        uioptions_file = module_dir + "uioptions.json"
+        uioptions_file = os.path.join(module_dir, "uioptions.json")
         with open(uioptions_file, 'w') as f:
             json.dump( module_options, f)
 
         return True
+
+    def _save_metadata(self, module_id, module_metadata):
+        prefix = ("%ssave_metadata(%s)" % (self._name, str(module_id)))
+        self._logger.debug("%s Updating Metadata: %s" % (prefix, str(module_metadata)))
+
+        module_dir = os.path.join(self._pce_module_dir, str(module_id))
+
+        if not os.path.exists(module_dir):
+            os.makedirs(module_dir)
+
+        # Write it out to a file
+        metadata_file = os.path.join(module_dir, "metadata.json")
+        with open(metadata_file, 'w') as f:
+            json.dump( module_metadata, f)
+
+        return True
+
 
     def get_module_uioptions(self, module_id, fields_only=False):
         prefix = ("%sget_module_uioptions(%s)" % (self._name, str(module_id)))
@@ -602,6 +617,43 @@ class PCEAccess():
         return module_options
 
 
+    
+    def get_module_metadata(self, module_id, fields_only=False):
+        """NOT FULLY FUNCTIONAL YET
+        TODO: need to set up module to communicate necessary data and make sure file is written before trying to read it.
+        """
+        prefix = ("%sget_module_metadata(%s)" % (self._name, str(module_id)))
+        self._logger.debug("%s Loading Metadata for module %s" % (prefix, str(module_id)))
+
+        module_dir = os.path.join(self._pce_module_dir, str(module_id))
+
+        if not os.path.exists(module_dir):
+            return None
+
+        # Read the JSON from a file
+        metadata_file = os.path.join(module_dir, "metadata.json")
+        if not os.path.exists(metadata_file):
+            return None
+
+        module_metadata = None
+        with open(metadata_file, 'r') as f:
+            module_metadata = json.load(f)
+
+        if fields_only is True:
+            # JJH Assume only two levels deep
+            metadata = {}
+            for out in module_metadata:
+                #self._logger.debug("%s Outer: %s" % (prefix, str(out)))
+                metadata[out] = []
+                for inner in module_metadata[out]:
+                    #self._logger.debug("%s Outer: %s Inner: %s" % (prefix, str(out), str(inner)))
+                    #options[out][inner] = ""
+                    metadata[out].append(inner)
+            return metadata
+
+        return module_metadata
+
+
     def _update_module_in_db(self, prefix, module):
         if module['state'] == "Does not exist":
             self._logger.error("%s Asking to update a module that does not exist. %s" % (prefix, str(module)))
@@ -620,6 +672,9 @@ class PCEAccess():
 
         if 'uioptions' in module and module["uioptions"] is not None:
             self._save_uioptions(module_id, module["uioptions"])
+
+        if 'metadata' in module and module["metadata"] is not None:
+            self._save_metadata(module_id, module["metadata"])
 
         pair_info = self._db.pce_add_module(self._pce_id, module_id,
                                             module['source_location']['type'],
@@ -756,7 +811,7 @@ class PCEAccess():
         if output is None:
             output = ""
 
-        job_info["output"] = output
+        job_info["output_file"] = output
 
         # JJH Do we want this to be 'unzip'ed?
         return job_info

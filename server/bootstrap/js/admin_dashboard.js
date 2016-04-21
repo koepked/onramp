@@ -8,6 +8,12 @@ function Job(data){
 	self.name = data['job_name'];
 	self.status = data['state'];
 	self.time = "0:00";  // not implemented yet
+
+
+	self.viewJob = function () {
+		// go to manage Jobs page and show this job
+		window.location.href = "admin_jobs.html";
+	};
 }
 
 function Workspace(data){
@@ -21,7 +27,12 @@ function Workspace(data){
 		sessionStorage.setItem("WorkspaceID", this.wID);
 		//alert("workspace " + localStorage.getItem('WorkspaceID'));
 		window.location.href = "workspace.html";
-	}
+	};
+
+	self.viewWorkspace = function () {
+		// go to manage Workspaces page and show this job
+		window.location.href = "admin_workspaces.html";
+	};
 
 }
 
@@ -38,7 +49,10 @@ function PCE (data) {
 	self.location = data['location'];
 	self.modules = ko.observableArray();
 
-
+	self.viewPCE = function () {
+		// go to manage Workspaces page and show this job
+		window.location.href = "admin_pces.html";
+	};
 }
 
 
@@ -55,7 +69,12 @@ function Module(data){
 		this.formFields.push({"field": "name", "value": "test"});
 		this.formFields.push({"field": "nodes", "value": 1});
 		this.formFields.push({"field": "processes", "value": 4});
-	}
+	};
+
+	self.viewModule = function () {
+		// go to manage users page and start with this user
+		window.location.href = "admin_modules.html";
+	};
 }
 
 function UserProfile(data) {
@@ -96,23 +115,23 @@ function AdminDashboardViewModel() {
 
 	self.manageUsers = function () {
 		window.location.href = "admin_users.html";
-	}
+	};
 
 	self.manageJobs = function () {
 		window.location.href = "admin_jobs.html";
-	}
+	};
 
 	self.manageWorkspaces = function () {
 		window.location.href = "admin_workspaces.html";
-	}
+	};
 
 	self.managePCEs = function () {
-		window.location.href = "admin_PCEs.html";
-	}
+		window.location.href = "admin_pces.html";
+	};
 
 	self.manageModules = function () {
-		window.location.href = "admin_Modules.html";
-	}
+		window.location.href = "admin_modules.html";
+	};
 
 	$(document).ready( function () {
 		// reinitialize values
@@ -122,10 +141,10 @@ function AdminDashboardViewModel() {
 		self.PCEslist([]);
 		self.Moduleslist([]);
 
-
+		console.log("server is: " + sessionStorage["server"]);
 
 		// get data from server
-		$.getJSON( "http://flux.cs.uwlax.edu/onramp/api/users/" + self.userID + "?apikey=" + JSON.parse(self.auth_data).apikey,
+		$.getJSON( sessionStorage["server"] + "/users/" + self.userID + "?apikey=" + JSON.parse(self.auth_data).apikey,
 					function (data){
 					// {"status": 0,
 					//  "status_message": "Success",
@@ -138,30 +157,30 @@ function AdminDashboardViewModel() {
 				}
 		);
 
-		$.getJSON( "http://flux.cs.uwlax.edu/onramp/api/users?apikey=" + JSON.parse(self.auth_data).apikey,
-								//self.auth_data,
-								function (data){
-									// {"status": 0,
-									//  "status_message": "Success",
-									//  "users": {
-									//    "fields": ["user_id", "username", "full_name", "email", "is_admin", "is_enabled"],
-									//    "data": [2, "alice", "", "", 0, 1]}}
-									console.log(JSON.stringify(data));
-									for (var x = 0; x < data.users.data.length; x++){
-										var raw = data.users.data[x];
-										console.log(raw);
-										var conv_data = {};
-										for(var i = 0; i < data.users.fields.length; i++){
-											console.log("adding: " + data.users.fields[i] + " = " + raw[i]);
-											conv_data[data.users.fields[i]] = raw[i];
-										}
-										self.Userslist.push(new UserProfile(conv_data));
-									}
-								}
-							);
+		$.getJSON(  sessionStorage["server"] + "users?apikey=" + JSON.parse(self.auth_data).apikey,
+					//self.auth_data,
+					function (data){
+					// {"status": 0,
+					//  "status_message": "Success",
+					//  "users": {
+					//    "fields": ["user_id", "username", "full_name", "email", "is_admin", "is_enabled"],
+					//    "data": [2, "alice", "", "", 0, 1]}}
+						console.log(JSON.stringify(data));
+						for (var x = 0; x < data.users.data.length; x++){
+							var raw = data.users.data[x];
+							console.log(raw);
+							var conv_data = {};
+							for(var i = 0; i < data.users.fields.length; i++){
+								console.log("adding: " + data.users.fields[i] + " = " + raw[i]);
+								conv_data[data.users.fields[i]] = raw[i];
+							}
+							self.Userslist.push(new UserProfile(conv_data));
+						}
+					}
+		);
 
 
-		$.getJSON( "http://flux.cs.uwlax.edu/onramp/api/jobs?apikey=" + JSON.parse(self.auth_data).apikey,
+		$.getJSON(  sessionStorage["server"] + "jobs?apikey=" + JSON.parse(self.auth_data).apikey,
 								//self.auth_data,
 								function (data){
 									// {"status": 0,
@@ -184,7 +203,7 @@ function AdminDashboardViewModel() {
 							);
 
 		// get workspaces for this user
-		$.getJSON( "http://flux.cs.uwlax.edu/onramp/api/workspaces?apikey=" + JSON.parse(self.auth_data).apikey,
+		$.getJSON(  sessionStorage["server"] + "workspaces?apikey=" + JSON.parse(self.auth_data).apikey,
 								//self.auth_data,
 								function (data){
 									// {"status": 0,
@@ -206,7 +225,7 @@ function AdminDashboardViewModel() {
 								}
 							);
 
-		$.getJSON( "http://flux.cs.uwlax.edu/onramp/api/pces?apikey=" + JSON.parse(self.auth_data).apikey,
+		$.getJSON(  sessionStorage["server"] + "pces?apikey=" + JSON.parse(self.auth_data).apikey,
 								//self.auth_data,
 								function (data){
 									// {"status": 0,
@@ -255,7 +274,7 @@ function AdminDashboardViewModel() {
 			// send post to server
 			$.ajax({
 			  type: 'POST',
-			  url: 'http://flux.cs.uwlax.edu/onramp/api/logout',
+			  url:  sessionStorage["server"] + 'logout',
 			  data: self.auth_data,
 			  complete: function () {
 				  window.location.href = "start.html";
