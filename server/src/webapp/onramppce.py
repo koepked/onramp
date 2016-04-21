@@ -19,11 +19,13 @@ from webapp_helper import server_root
 # Reference: https://urllib3.readthedocs.org/en/latest/security.html#pyopenssl
 requests.packages.urllib3.contrib.pyopenssl.inject_into_urllib3()
 
-
-# Some (all?) exceptions from the requests lib do not stick to typical exception
-# attrs (https://github.com/kennethreitz/requests/issues/3004), thus, this is
-# needed.
 def get_requests_err_msg(ex):
+    """Return a sensible error message from a requests lib SSLError.
+
+    Some (all?) exceptions from the requests lib do not stick to typical
+    exception attrs (https://github.com/kennethreitz/requests/issues/3004),
+    thus, this is needed.
+    """
     error_number = None
     current_error = ex
     while isinstance(current_error, Exception) and error_number is None:
@@ -48,6 +50,10 @@ class PCEAccess():
         delete_job: Delete given job from PCE.
         check_connection: Ping the server to see if it is still available.
         establish_connection: Handshake to establish authorization (JJH TODO).
+        retrieve_cert: Retrieve, via SSH, the SSL certificate used by the given
+            PCE.
+        register_client: Register, using PCEAccess instance attrs, a PCE user on
+            the PCE.
     """
     _name = "[PCEAccess] "
     _tmp_dir = ""
@@ -201,10 +207,21 @@ class PCEAccess():
                 return False
             return True
 
-    # Some (all?) exceptions from the requests lib do not stick to typical
-    # exception attrs (https://github.com/kennethreitz/requests/issues/3004),
-    # thus, this is needed.
     def _build_status_from_err(self, msg):
+        """Build and log requests SSLError response.
+
+        Some (all?) exceptions from the requests lib do not stick to typical
+        exception attrs (https://github.com/kennethreitz/requests/issues/3004),
+        thus, this is needed.
+
+        Args:
+            msg (str): requests SSLError message returned from
+                get_requests_err_msg().
+
+        Returns:
+            Minimal OnRamp-style JSON response object containing only status
+            info.
+        """
         errno = -10
         errmsg = 'SSL Certificate Error'
         missing_filename = msg.split("bad ca_certs: '")[1].split("'")[0]
@@ -213,10 +230,44 @@ class PCEAccess():
         return {'status_code': errno, 'status_msg': errmsg}
 
     def _get_cert_filename(self):
-        return os.path.join(server_root, self._cert_dir, '%d.crt' % self._pce_id)
+        """Return the filename of the SSL certificate to be used by the
+        instance.
+        """
+        return os.path.join(server_root, self._cert_dir,
+                            '%d.crt' % self._pce_id)
 
     def retrieve_cert(self, hostname, ssh_port, unix_user, unix_password,
                onramp_base_dir=None):
+        """Retrieve, via SSH, the SSL certificate used by the given PCE.
+
+        Supports both password and pubkey SSH auth, however, cannot anticipate
+        which prior to call, thus, the unix_password arg will be submitted for
+        pubkey passphrase if requested, or for the account password if
+        requested.
+
+        Upon return, the retrieved SSL cert will be stored with the filename
+        returned by self._get_cert_filename().
+
+        Args:
+            hostname (str): Hostname/IP of the PCE.
+            ssh_port (int): PCE SSH daemon port.
+            unix_user (str): Username of account with SSH access to PCE host
+                and read access to the PCE OnRamp files.
+            unix_password (str): Unix account password or pubkey passphrase for
+                unix_user.
+
+        Kwargs:
+            onramp_base_dir (str): Root dir of OnRamp installation on PCE. If
+                'None', a default of '/home/%s/onramp' % unix_user is used.
+
+        Returns:
+            One of the following tuples:
+                (0, 'Success')
+                (-1, 'Bad onramp_base_dir: Should end with "onramp"')
+                (-2, 'Unexpected output when attempting to transfer cert')
+                (-3, 'Incorrect username/password given')
+                (-4, 'Connection refused')
+        """
 
         if not onramp_base_dir:
             onramp_base_dir = '/home/%s/onramp' % unix_user
@@ -234,8 +285,7 @@ class PCEAccess():
             '/pce/src/keys/onramp_pce.crt '
             '%s'
             % (ssh_port, unix_user, hostname, onramp_base_dir,
-               os.path.join(server_root, self._cert_dir,
-                            '%d.crt' % self._pce_id))
+               self._get_cert_filename())
         )
         child = pexpect.spawn(command)
         result = child.expect(['Password:', 'password:', 'Enter passphrase',
@@ -265,6 +315,35 @@ class PCEAccess():
 
     def register_client(self, hostname, ssh_port, unix_user, unix_password,
                onramp_base_dir=None):
+        """Register, using PCEAccess instance attrs, a PCE user on the PCE.
+
+        Supports both password and pubkey SSH auth, however, cannot anticipate
+        which prior to call, thus, the unix_password arg will be submitted for
+        pubkey passphrase if requested, or for the account password if
+        requested.
+
+        Args:
+            hostname (str): Hostname/IP of the PCE.
+            ssh_port (int): PCE SSH daemon port.
+            unix_user (str): Username of account with SSH access to PCE host
+                and read access to the PCE OnRamp files.
+            unix_password (str): Unix account password or pubkey passphrase for
+                unix_user.
+
+        Kwargs:
+            onramp_base_dir (str): Root dir of OnRamp installation on PCE. If
+                'None', a default of '/home/%s/onramp' % unix_user is used.
+
+        Returns:
+            One of the following tuples:
+                (0, 'Success')
+                (-1, 'Bad onramp_base_dir: Should end with "onramp"')
+                (-2, 'SERVERNAME/USERNAME already configured for client access')
+                (-3, 'PCE user registration sys error')
+                (-4, 'Registration info transfer error')
+                (-5, 'Incorrect connection/auth attrs given')
+                (-6, 'Unknown error occured during user registration')
+        """
 
         if not onramp_base_dir:
             onramp_base_dir = '/home/%s/onramp' % unix_user
@@ -981,12 +1060,12 @@ if __name__ == '__main__':
     pce = PCEAccess(logger, Dummy(logger), 1,
                     os.path.expanduser('~/tmp/onramp'),'testserver', 'dan',
                     'pa55w0rd')
-    (result, msg) = pce.retrieve_cert(_ip_addr, 22, _username, _password,
+    (result, msg) = pce.retrieve_cert(_ip_addr, 871, _username, _password,
                                       _onramp_dir)
     if result != 0:
         print msg
 
-    (result, msg) = pce.register_client(_ip_addr, 22, _username, _password,
+    (result, msg) = pce.register_client(_ip_addr, 871, _username, _password,
                                         _onramp_dir)
     if result != 0:
         print msg
