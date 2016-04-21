@@ -166,7 +166,12 @@ class PCEAccess():
                 return False
             return True
 
-    def attach(self, hostname, port, unix_user, unix_password, onramp_base_dir):
+    def attach(self, hostname, port, unix_user, unix_password,
+               onramp_base_dir=None):
+
+        if not onramp_base_dir:
+            onramp_base_dir = '/home/%s/onramp' % unix_user
+
         while onramp_base_dir.endswith('/'):
             onramp_base_dir = onramp_base_dir[:-1]
         if not onramp_base_dir.endswith('onramp'):
@@ -175,6 +180,7 @@ class PCEAccess():
         command = ('scp '
             '-o PreferredAuthentications=password '
             '-o PubkeyAuthentication=no '
+            '-o StrictHostKeyChecking=no '
             '-P %d '
             '%s@%s:%s'
             '/pce/src/keys/onramp_pce.crt '
