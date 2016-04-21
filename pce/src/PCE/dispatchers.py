@@ -484,9 +484,9 @@ class ClusterPing(_OnRampDispatcher):
         """Respond to a request to verify connectivity.
         
         Returns:
-            200 HTTP response with empty response body
+            200 HTTP response with minimal response JSON object.
         """
-        return {}
+        return {'status_code': 0, 'status_msg': 'Success'}
 
 
 class Cluster(_OnRampDispatcher):
