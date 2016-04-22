@@ -115,9 +115,15 @@ class PCEAccess():
         """
         s = requests.Session()
         url = "%s/%s/" % (self._url, endpoint)
+        credentials = {
+            'servername': self._servername,
+            'username': self._username,
+            'password': self._password
+        }
 
         try:
-            r = s.get(url, params=kwargs, verify=self._get_cert_filename())
+            r = s.get(url, params=kwargs, verify=self._get_cert_filename(),
+                      auth=(json.dumps(credentials),''))
         except requests.exceptions.SSLError as e:
             msg = get_requests_err_msg(e)
             if msg.startswith('bad ca_certs'):
@@ -154,9 +160,16 @@ class PCEAccess():
         url = "%s/%s/" % (self._url, endpoint)
         data = json.dumps(kwargs)
         headers = {"content-type": "application/json"}
+        credentials = {
+            'servername': self._servername,
+            'username': self._username,
+            'password': self._password
+        }
+
         try:
             r = s.post(url, data=data, headers=headers,
-                       verify=self._get_cert_filename())
+                       verify=self._get_cert_filename(),
+                       auth=(json.dumps(credentials),''))
         except requests.exceptions.SSLError as e:
             msg = get_requests_err_msg(e)
             if msg.startswith('bad ca_certs'):
@@ -188,8 +201,15 @@ class PCEAccess():
         """
         s = requests.Session()
         url = "%s/%s/" % (self._url, endpoint)
+        credentials = {
+            'servername': self._servername,
+            'username': self._username,
+            'password': self._password
+        }
+
         try:
-            r = s.delete(url, verify=self._get_cert_filename())
+            r = s.delete(url, verify=self._get_cert_filename(),
+                         auth=(json.dumps(credentials),''))
         except requests.exceptions.SSLError as e:
             msg = get_requests_err_msg(e)
             if msg.startswith('bad ca_certs'):
@@ -1069,7 +1089,6 @@ if __name__ == '__main__':
                                         _onramp_dir)
     if result != 0:
         print msg
-    sys.exit(0)
 
     print 'Connection'
     print pce.establish_connection()
@@ -1078,6 +1097,7 @@ if __name__ == '__main__':
     print avail_mods
     print 'Mods before install'
     print pce.get_modules()
+    sys.exit(0)
     print 'Installing all available mods...'
     i = 1
     for mod in avail_mods:
