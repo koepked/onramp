@@ -9,6 +9,7 @@ import pexpect
 import requests
 import time
 
+from pexpect import pxssh
 from webapp_helper import server_root
 
 # The stdlib's ssl module has some limitations which are adressed by PyOpenSSL.
@@ -17,6 +18,21 @@ from webapp_helper import server_root
 #
 # Reference: https://urllib3.readthedocs.org/en/latest/security.html#pyopenssl
 requests.packages.urllib3.contrib.pyopenssl.inject_into_urllib3()
+
+def get_requests_err_msg(ex):
+    """Return a sensible error message from a requests lib SSLError.
+
+    Some (all?) exceptions from the requests lib do not stick to typical
+    exception attrs (https://github.com/kennethreitz/requests/issues/3004),
+    thus, this is needed.
+    """
+    error_number = None
+    current_error = ex
+    while isinstance(current_error, Exception) and error_number is None:
+        error_number = getattr(current_error, 'errno', None)
+        current_error = current_error.args[0]
+
+    return current_error
 
 class PCEAccess():
     """Client-side interface to OnRamp PCE server.
@@ -34,6 +50,10 @@ class PCEAccess():
         delete_job: Delete given job from PCE.
         check_connection: Ping the server to see if it is still available.
         establish_connection: Handshake to establish authorization (JJH TODO).
+        retrieve_cert: Retrieve, via SSH, the SSL certificate used by the given
+            PCE.
+        register_client: Register, using PCEAccess instance attrs, a PCE user on
+            the PCE.
     """
     _name = "[PCEAccess] "
     _tmp_dir = ""
@@ -42,7 +62,8 @@ class PCEAccess():
     _pce_job_dir = ""
     _cert_dir = "src/certs"
     
-    def __init__(self, logger, dbaccess, pce_id, tmp_dir):
+    def __init__(self, logger, dbaccess, pce_id, tmp_dir, servername, username,
+                 password):
         """Initialize PCEAccess instance.
 
         Args:
@@ -54,11 +75,14 @@ class PCEAccess():
         self._logger = logger
         self._db     = dbaccess
         self._pce_id = int(pce_id)
+        self._servername = servername
+        self._username = username
+        self._password = password
 
         self._tmp_dir = tmp_dir
-        self._pce_dir = self._tmp_dir + "tmp/pce/" + str(self._pce_id) + "/"
-        self._pce_module_dir = self._pce_dir + "/modules/"
-        self._pce_job_dir = self._pce_dir + "/jobs/"
+        self._pce_dir = os.path.join(self._tmp_dir, "tmp", "pce", str(self._pce_id))
+        self._pce_module_dir = os.path.join(self._pce_dir, "modules")
+        self._pce_job_dir = os.path.join(self._pce_dir, "jobs")
 
         if not os.path.exists(self._pce_dir):
             os.makedirs(self._pce_dir)
@@ -73,7 +97,7 @@ class PCEAccess():
         pce_info = self._db.pce_get_info(pce_id)
         self._url = "https://%s:%d" % (pce_info['data'][2], pce_info['data'][3])
 
-    def _pce_get(self, endpoint, raw=False, **kwargs):
+    def _pce_get(self, endpoint, **kwargs):
         """Execute GET request to PCE endpoint.
 
         Args:
@@ -91,16 +115,28 @@ class PCEAccess():
         """
         s = requests.Session()
         url = "%s/%s/" % (self._url, endpoint)
-        r = s.get(url, params=kwargs,
-                  verify='/home/dan/onramp/server/src/onramp_pce.crt')
+        credentials = {
+            'servername': self._servername,
+            'username': self._username,
+            'password': self._password
+        }
+
+        try:
+            r = s.get(url, params=kwargs, verify=self._get_cert_filename(),
+                      auth=(json.dumps(credentials),''))
+        except requests.exceptions.SSLError as e:
+            msg = get_requests_err_msg(e)
+            if msg.startswith('bad ca_certs'):
+                return self._build_status_from_err(msg)
+            raise
 
         if r.status_code != 200:
+            err_msg = ('%s Error: %d from GET %s: %s'
+                       % (self._name, r.status_code, url, r.text))
             self._logger.error('%s Error: %d from GET %s: %s'
                                % (self._name, r.status_code, url, r.text))
-            return None
+            return {'status_code': -11, 'status_msg': err_msg}
         else:
-            if raw:
-                return r
             return r.json()
 
     def _pce_post(self, endpoint, **kwargs):
@@ -124,8 +160,21 @@ class PCEAccess():
         url = "%s/%s/" % (self._url, endpoint)
         data = json.dumps(kwargs)
         headers = {"content-type": "application/json"}
-        r = s.post(url, data=data, headers=headers,
-                   verify='/home/dan/onramp/server/src/onramp_pce.crt')
+        credentials = {
+            'servername': self._servername,
+            'username': self._username,
+            'password': self._password
+        }
+
+        try:
+            r = s.post(url, data=data, headers=headers,
+                       verify=self._get_cert_filename(),
+                       auth=(json.dumps(credentials),''))
+        except requests.exceptions.SSLError as e:
+            msg = get_requests_err_msg(e)
+            if msg.startswith('bad ca_certs'):
+                return self._build_status_from_err(msg)
+            raise
 
         if r.status_code != 200:
             self._logger.error('%s Error: %d from POST %s: %s'
@@ -152,8 +201,20 @@ class PCEAccess():
         """
         s = requests.Session()
         url = "%s/%s/" % (self._url, endpoint)
-        r = s.delete(url,
-                     verify='/home/dan/onramp/server/src/onramp_pce.crt')
+        credentials = {
+            'servername': self._servername,
+            'username': self._username,
+            'password': self._password
+        }
+
+        try:
+            r = s.delete(url, verify=self._get_cert_filename(),
+                         auth=(json.dumps(credentials),''))
+        except requests.exceptions.SSLError as e:
+            msg = get_requests_err_msg(e)
+            if msg.startswith('bad ca_certs'):
+                return self._build_status_from_err(msg)
+            raise
 
         if r.status_code != 200:
             self._logger.error('%s Error: %d from DELETE %s: %s'
@@ -166,8 +227,67 @@ class PCEAccess():
                 return False
             return True
 
-    def attach(self, hostname, port, unix_user, unix_password,
+    def _build_status_from_err(self, msg):
+        """Build and log requests SSLError response.
+
+        Some (all?) exceptions from the requests lib do not stick to typical
+        exception attrs (https://github.com/kennethreitz/requests/issues/3004),
+        thus, this is needed.
+
+        Args:
+            msg (str): requests SSLError message returned from
+                get_requests_err_msg().
+
+        Returns:
+            Minimal OnRamp-style JSON response object containing only status
+            info.
+        """
+        errno = -10
+        errmsg = 'SSL Certificate Error'
+        missing_filename = msg.split("bad ca_certs: '")[1].split("'")[0]
+        self._logger.error('%s Error: %s: File: %s'
+                           % (self._name, errmsg, missing_filename))
+        return {'status_code': errno, 'status_msg': errmsg}
+
+    def _get_cert_filename(self):
+        """Return the filename of the SSL certificate to be used by the
+        instance.
+        """
+        return os.path.join(server_root, self._cert_dir,
+                            '%d.crt' % self._pce_id)
+
+    def retrieve_cert(self, hostname, ssh_port, unix_user, unix_password,
                onramp_base_dir=None):
+        """Retrieve, via SSH, the SSL certificate used by the given PCE.
+
+        Supports both password and pubkey SSH auth, however, cannot anticipate
+        which prior to call, thus, the unix_password arg will be submitted for
+        pubkey passphrase if requested, or for the account password if
+        requested.
+
+        Upon return, the retrieved SSL cert will be stored with the filename
+        returned by self._get_cert_filename().
+
+        Args:
+            hostname (str): Hostname/IP of the PCE.
+            ssh_port (int): PCE SSH daemon port.
+            unix_user (str): Username of account with SSH access to PCE host
+                and read access to the PCE OnRamp files.
+            unix_password (str): Unix account password or pubkey passphrase for
+                unix_user.
+
+        Kwargs:
+            onramp_base_dir (str): Root dir of OnRamp installation on PCE. If
+                'None', a default of '/home/%s/onramp' % unix_user is used.
+
+        Returns:
+            One of the following tuples:
+                (0, 'Success')
+                (-1, 'Bad onramp_base_dir: Should end with "onramp"')
+                (-2, 'Unexpected output when attempting to transfer cert')
+                (-3, 'Incorrect username/password given')
+                (-4, 'Connection refused')
+        """
 
         if not onramp_base_dir:
             onramp_base_dir = '/home/%s/onramp' % unix_user
@@ -177,26 +297,119 @@ class PCEAccess():
         if not onramp_base_dir.endswith('onramp'):
             return (-1, 'Bad onramp_base_dir: Should end with "onramp"')
 
+        # Retrieve SSL cert from PCE.
         command = ('scp '
-            '-o PreferredAuthentications=password '
-            '-o PubkeyAuthentication=no '
             '-o StrictHostKeyChecking=no '
             '-P %d '
             '%s@%s:%s'
             '/pce/src/keys/onramp_pce.crt '
             '%s'
-            % (port, unix_user, hostname, onramp_base_dir,
-               os.path.join(server_root, self._cert_dir,
-                            '%d.crt' % self._pce_id))
+            % (ssh_port, unix_user, hostname, onramp_base_dir,
+               self._get_cert_filename())
         )
-
         child = pexpect.spawn(command)
-        result = child.expect(['Password:', 'password:'])
-        if result == 0 or result == 1:
+        result = child.expect(['Password:', 'password:', 'Enter passphrase',
+                               'onramp_pce.crt', 'Connection refused'])
+
+        if result in [0,1,2]:
             child.sendline(unix_password)
+            result = child.expect(['onramp_pce.crt', 'Password:', 'password:',
+                                   'Enter passphrase'])
+
+            if result == 0:
+                child.read()
+            elif result in [1,2,3]:
+                return (-3, 'Incorrect username/password given')
+            else:
+                return (-2, 'Unexpected output when attempting to transfer cert')
+
+        elif result == 3:
             child.read()
+        elif result == 4:
+            return (-4, 'Connection refused')
+
         else:
             return (-2, 'Unexpected output when attempting to transfer cert')
+
+        return (0, 'Success')
+
+    def register_client(self, hostname, ssh_port, unix_user, unix_password,
+               onramp_base_dir=None):
+        """Register, using PCEAccess instance attrs, a PCE user on the PCE.
+
+        Supports both password and pubkey SSH auth, however, cannot anticipate
+        which prior to call, thus, the unix_password arg will be submitted for
+        pubkey passphrase if requested, or for the account password if
+        requested.
+
+        Args:
+            hostname (str): Hostname/IP of the PCE.
+            ssh_port (int): PCE SSH daemon port.
+            unix_user (str): Username of account with SSH access to PCE host
+                and read access to the PCE OnRamp files.
+            unix_password (str): Unix account password or pubkey passphrase for
+                unix_user.
+
+        Kwargs:
+            onramp_base_dir (str): Root dir of OnRamp installation on PCE. If
+                'None', a default of '/home/%s/onramp' % unix_user is used.
+
+        Returns:
+            One of the following tuples:
+                (0, 'Success')
+                (-1, 'Bad onramp_base_dir: Should end with "onramp"')
+                (-2, 'SERVERNAME/USERNAME already configured for client access')
+                (-3, 'PCE user registration sys error')
+                (-4, 'Registration info transfer error')
+                (-5, 'Incorrect connection/auth attrs given')
+                (-6, 'Unknown error occured during user registration')
+        """
+
+        if not onramp_base_dir:
+            onramp_base_dir = '/home/%s/onramp' % unix_user
+        while onramp_base_dir.endswith('/'):
+            onramp_base_dir = onramp_base_dir[:-1]
+        if not onramp_base_dir.endswith('onramp'):
+            return (-1, 'Bad onramp_base_dir: Should end with "onramp"')
+
+        child = pxssh.pxssh()
+        try:
+            child.login(hostname, unix_user, unix_password, port=ssh_port)
+            child.sendline('cd %s/pce' % onramp_base_dir)
+            child.prompt()
+            child.before
+            child.sendline('bin/onramp_pce_service.py addclient %s %s'
+                           % (self._servername, self._username))
+            result = child.expect([
+                'Password:',
+                ('Servername/Username pair "%s/%s" already configured for '
+                    'client access' % (self._servername, self._username)),
+                'Client password file "src/pce_client.pwd" has been corrupted'
+            ])
+            if result == 1:
+                child.logout()
+                return (-2, '%s/%s already configured for client access'
+                            % (self._servername, self._username))
+            if result == 2:
+                child.logout()
+                return (-3, 'PCE user registration sys error')
+
+            child.sendline(self._password)
+            child.expect('Verify Password:')
+            child.sendline(self._password)
+            result = child.expect([child.PROMPT, 'Password verification failed'])
+            if result == 1:
+                child.logout()
+                return (-4, 'Registration info transfer error')
+        except pexpect.exceptions.EOF:
+            child.logout()
+            return (-5, 'Incorrect connection/auth attrs given')
+        except pexpect.exceptions.TIMEOUT:
+            child.logout()
+            return (-6, 'Unknown error occured during user registration')
+            
+        child.logout()
+        return (0, 'Success')
 
     def get_modules_avail(self):
         """Return the list of modules that are available at the PCE but not
@@ -352,10 +565,13 @@ class PCEAccess():
         """Ping the given PCE.
 
         Returns:
-            HTTP response code from PCE ping request.
+            True if able to succesfully connect via HTTP.
+            False otherwise.
         """
         endpoint = "cluster/ping"
-        return self._pce_get(endpoint, raw=True).status_code
+        result = self._pce_get(endpoint)
+        return result['status_code'] == 0
+
 
     def check_connection(self):
         """Ping the server to see if it still available. Record status in given
@@ -364,12 +580,12 @@ class PCEAccess():
         Returns:
             True if connected, False if not.
         """
-        status_code = self.ping()
+        good_ping = self.ping()
 
-        self._logger.debug("%scheck_connection() %d from %s"
-                           % (self._name, status_code, self._url))
+        self._logger.debug("%scheck_connection() %r from %s"
+                           % (self._name, good_ping, self._url))
 
-        if status_code == 200:
+        if good_ping:
             self._db.pce_update_state( self._pce_id, 0 ) # see onrampdb.py
             return True
         else:
@@ -465,13 +681,13 @@ class PCEAccess():
         if output is None:
             return True
 
-        job_dir = self._pce_job_dir + "/" + str(job_id) + "/"
+        job_dir = os.path.join(self._pce_job_dir, str(job_id))
 
         if not os.path.exists(job_dir):
             os.makedirs(job_dir)
 
         # Write it out
-        output_file = job_dir + "output.txt"
+        output_file = os.path.join(job_dir, "output.txt")
         with open(output_file, 'w') as f:
             f.write(output)
 
@@ -481,35 +697,50 @@ class PCEAccess():
         prefix = ("%sget_job_output(%s)" % (self._name, str(job_id)))
         self._logger.debug("%s load Job output: %s" % (prefix, str(job_id)))
 
-        job_dir = self._pce_job_dir + "/" + str(job_id) + "/"
+        job_dir = os.path.join(self._pce_job_dir, str(job_id))
 
         if not os.path.exists(job_dir):
             return None
 
-        output_file = job_dir + "output.txt"
-        output = ""
-        with open(output_file) as f:
-            for line in f:
-                output += line
+        # need relative job dir to server location
+        abs_output_file = os.path.join(job_dir, "output.txt")
+        rel_output_file = os.path.relpath(abs_output_file, self._tmp_dir)
 
-        return output
+        return rel_output_file
 
 
     def _save_uioptions(self, module_id, module_options):
         prefix = ("%ssave_uioptions(%s)" % (self._name, str(module_id)))
         self._logger.debug("%s Updating UI Options: %s" % (prefix, str(module_options)))
 
-        module_dir = self._pce_module_dir + "/" + str(module_id) + "/"
+        module_dir = os.path.join(self._pce_module_dir, str(module_id))
 
         if not os.path.exists(module_dir):
             os.makedirs(module_dir)
 
         # Write it out to a file
-        uioptions_file = module_dir + "uioptions.json"
+        uioptions_file = os.path.join(module_dir, "uioptions.json")
         with open(uioptions_file, 'w') as f:
             json.dump( module_options, f)
 
         return True
+
+    def _save_metadata(self, module_id, module_metadata):
+        prefix = ("%ssave_metadata(%s)" % (self._name, str(module_id)))
+        self._logger.debug("%s Updating Metadata: %s" % (prefix, str(module_metadata)))
+
+        module_dir = os.path.join(self._pce_module_dir, str(module_id))
+
+        if not os.path.exists(module_dir):
+            os.makedirs(module_dir)
+
+        # Write it out to a file
+        metadata_file = os.path.join(module_dir, "metadata.json")
+        with open(metadata_file, 'w') as f:
+            json.dump( module_metadata, f)
+
+        return True
+
 
     def get_module_uioptions(self, module_id, fields_only=False):
         prefix = ("%sget_module_uioptions(%s)" % (self._name, str(module_id)))
@@ -541,6 +772,43 @@ class PCEAccess():
         return module_options
 
 
+    
+    def get_module_metadata(self, module_id, fields_only=False):
+        """NOT FULLY FUNCTIONAL YET
+        TODO: need to set up module to communicate necessary data and make sure file is written before trying to read it.
+        """
+        prefix = ("%sget_module_metadata(%s)" % (self._name, str(module_id)))
+        self._logger.debug("%s Loading Metadata for module %s" % (prefix, str(module_id)))
+
+        module_dir = os.path.join(self._pce_module_dir, str(module_id))
+
+        if not os.path.exists(module_dir):
+            return None
+
+        # Read the JSON from a file
+        metadata_file = os.path.join(module_dir, "metadata.json")
+        if not os.path.exists(metadata_file):
+            return None
+
+        module_metadata = None
+        with open(metadata_file, 'r') as f:
+            module_metadata = json.load(f)
+
+        if fields_only is True:
+            # JJH Assume only two levels deep
+            metadata = {}
+            for out in module_metadata:
+                #self._logger.debug("%s Outer: %s" % (prefix, str(out)))
+                metadata[out] = []
+                for inner in module_metadata[out]:
+                    #self._logger.debug("%s Outer: %s Inner: %s" % (prefix, str(out), str(inner)))
+                    #options[out][inner] = ""
+                    metadata[out].append(inner)
+            return metadata
+
+        return module_metadata
+
+
     def _update_module_in_db(self, prefix, module):
         if module['state'] == "Does not exist":
             self._logger.error("%s Asking to update a module that does not exist. %s" % (prefix, str(module)))
@@ -559,6 +827,9 @@ class PCEAccess():
 
         if 'uioptions' in module and module["uioptions"] is not None:
             self._save_uioptions(module_id, module["uioptions"])
+
+        if 'metadata' in module and module["metadata"] is not None:
+            self._save_metadata(module_id, module["metadata"])
 
         pair_info = self._db.pce_add_module(self._pce_id, module_id,
                                             module['source_location']['type'],
@@ -695,7 +966,7 @@ class PCEAccess():
         if output is None:
             output = ""
 
-        job_info["output"] = output
+        job_info["output_file"] = output
 
         # JJH Do we want this to be 'unzip'ed?
         return job_info
@@ -806,9 +1077,18 @@ if __name__ == '__main__':
         logging.Formatter('[%(asctime)s] %(levelname)s %(message)s'))
     logger.addHandler(handler)
 
-    pce = PCEAccess(logger, Dummy(logger), 1, '~/tmp/onramp')
-    pce.attach(_ip_addr, _port, _username, _password, _onramp_dir)
-    sys.exit(0)
+    pce = PCEAccess(logger, Dummy(logger), 1,
+                    os.path.expanduser('~/tmp/onramp'),'testserver', 'dan',
+                    'pa55w0rd')
+    (result, msg) = pce.retrieve_cert(_ip_addr, 871, _username, _password,
+                                      _onramp_dir)
+    if result != 0:
+        print msg
+
+    (result, msg) = pce.register_client(_ip_addr, 871, _username, _password,
+                                        _onramp_dir)
+    if result != 0:
+        print msg
 
     print 'Connection'
     print pce.establish_connection()
@@ -817,6 +1097,7 @@ if __name__ == '__main__':
     print avail_mods
     print 'Mods before install'
     print pce.get_modules()
+    sys.exit(0)
     print 'Installing all available mods...'
     i = 1
     for mod in avail_mods:
