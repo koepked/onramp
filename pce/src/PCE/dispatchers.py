@@ -7,8 +7,12 @@ Exports:
     Cluster: View cluster status.
 """
 
+import bcrypt
+import json
 import logging
 import os
+import sys
+from base64 import b64decode
 from multiprocessing import Process
 
 import cherrypy
@@ -22,6 +26,32 @@ from PCE.tools.modules import deploy_module, get_modules, \
                               get_available_modules, init_module_delete, \
                               install_module
 from PCEHelper import pce_root
+
+PWD_FILE = 'src/pce_client.pwd'
+
+def auth_required(method):
+    def validate(self, *args, **kwargs):
+        try:
+            auth = cherrypy.request.headers['Authorization']
+
+            # Parse JSON string from Authorization header.
+            credentials_str = b64decode(auth.split('Basic ')[1])[:-1]
+
+            credentials = json.loads(credentials_str)
+            servername = credentials['servername']
+            username = credentials['username']
+            password = credentials['password'].encode('utf-8')
+            with open(os.path.join(pce_root, PWD_FILE), 'r') as f:
+                pwd = json.load(f)
+            hashed = pwd[servername][username]['pwd'].encode('utf-8')
+            assert bcrypt.hashpw(password, hashed) == hashed
+
+        except:
+            raise cherrypy.HTTPError("401 Unauthorized")
+
+        return method(self, *args, **kwargs)
+
+    return validate
 
 class Files:
     """Provide access to visible files in job runs.
@@ -40,6 +70,7 @@ class Files:
         self.conf = conf
         self.logger = logging.getLogger(log_name)
 
+    @auth_required
     def GET(self, *args, **kwargs):
         """Return requested file, or indication of error.
 
@@ -200,6 +231,7 @@ class Modules(_OnRampDispatcher):
         PUT: Update a specific module.
         DELETE: Remove a specific module.
     """
+    @auth_required
     def GET(self, id=None, **kwargs):
         """Return list of installed modules or detail view for specific module.
 
@@ -212,6 +244,8 @@ class Modules(_OnRampDispatcher):
             OnRamp formatted dict containing requested module data.
         """
         self.log_call('GET')
+        self.logger.debug('id: %s' % str(id))
+        self.logger.debug('kwargs: %s' % str(kwargs))
 
         if 'state' in kwargs.keys() and kwargs['state'] == 'Available':
             return self.get_response(modules=get_available_modules())
@@ -222,6 +256,7 @@ class Modules(_OnRampDispatcher):
         else:
             return self.get_response(modules=get_modules())
 
+    @auth_required
     def POST(self, id=None, **kwargs):
         """Clone/copy a new module or deploy a previously cloned/copied module.
 
@@ -275,6 +310,7 @@ class Modules(_OnRampDispatcher):
 
         return self.get_response(status_msg='Checkout initiated')
 
+    @auth_required
     def PUT(self, id, **kwargs):
         """Update a specific module.
 
@@ -292,6 +328,7 @@ class Modules(_OnRampDispatcher):
         # Overwrite the resource.
         return self.get_response()
 
+    @auth_required
     def DELETE(self, id, **kwargs):
         """Delete a specific module.
 
@@ -329,6 +366,7 @@ class Jobs(_OnRampDispatcher):
         PUT: Update a specific job.
         DELETE: Delete a specific job.
     """
+    @auth_required
     def GET(self, id, **kwargs):
         """Get status/results for specific job.
 
@@ -349,6 +387,7 @@ class Jobs(_OnRampDispatcher):
         else:
             return self.get_response(jobs=get_jobs())
 
+    @auth_required
     def POST(self, **kwargs):
         """Launch a new job.
 
@@ -381,6 +420,7 @@ class Jobs(_OnRampDispatcher):
         p.start()
         return self.get_response(status_msg='Job launched')
 
+    @auth_required
     def PUT(self, id, **kwargs):
         """Update a specific job.
 
@@ -398,6 +438,7 @@ class Jobs(_OnRampDispatcher):
         # Overwrite the resource.
         return self.get_response()
 
+    @auth_required
     def DELETE(self, id, **kwargs):
         """Delete a specific job.
 
