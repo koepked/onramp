@@ -663,7 +663,7 @@ def _addclient():
         try:
             pwd_file = open(pce_client_pwd_file, 'r+')
             try:
-                data = json.loads(pwd_file.read())
+                data = json.load(pwd_file)
             except:
                 handle_err('Client password file "%s" has been corrupted'
                            % pce_client_pwd_file, pwd_file)
@@ -696,7 +696,7 @@ def _addclient():
             data[args.servername] = {args.username: {'pwd': hashed}}
 
         pwd_file.seek(0)
-        pwd_file.write(json.dumps(data))
+        json.dump(data, pwd_file)
         pwd_file.truncate()
         pwd_file.close()
 
