@@ -11,6 +11,7 @@ import time
 
 from pexpect import pxssh
 from webapp_helper import server_root
+from PCE.tools import PCEClient
 
 # The stdlib's ssl module has some limitations which are adressed by PyOpenSSL.
 # The following gets the requests lib to get the urllib3 lib to use PyOpenSSL
@@ -75,9 +76,11 @@ class PCEAccess():
         self._logger = logger
         self._db     = dbaccess
         self._pce_id = int(pce_id)
-        self._servername = servername
-        self._username = username
-        self._password = password
+
+        pce_info = self._db.pce_get_info(pce_id)
+        self._client = PCEClient(logger, pce_info['data'][2],
+                                 pce_info['data'][3], pce_id, servername,
+                                 username, password)
 
         self._tmp_dir = tmp_dir
         self._pce_dir = os.path.join(self._tmp_dir, "tmp", "pce", str(self._pce_id))
@@ -91,326 +94,6 @@ class PCEAccess():
         if not os.path.exists(self._pce_job_dir):
             os.makedirs(self._pce_job_dir)
 
-        #
-        # Get the PCE server information
-        #
-        pce_info = self._db.pce_get_info(pce_id)
-        self._url = "https://%s:%d" % (pce_info['data'][2], pce_info['data'][3])
-
-    def _pce_get(self, endpoint, **kwargs):
-        """Execute GET request to PCE endpoint.
-
-        Args:
-            endpoint (str): API URL endpoint for request. Must not have leading
-                or trailing slashes.
-            raw (bool): If True, return raw response, else return JSON portion
-                of response only.
-
-        Kwargs:
-            Key/val pairs in kwargs will become key/val pairs included as HTTP
-            query paramaters in the request.
-
-        Returns:
-            JSON response object on success, 'None' on error.
-        """
-        s = requests.Session()
-        url = "%s/%s/" % (self._url, endpoint)
-        credentials = {
-            'servername': self._servername,
-            'username': self._username,
-            'password': self._password
-        }
-
-        try:
-            r = s.get(url, params=kwargs, verify=self._get_cert_filename(),
-                      auth=(json.dumps(credentials),''))
-        except requests.exceptions.SSLError as e:
-            msg = get_requests_err_msg(e)
-            if msg.startswith('bad ca_certs'):
-                return self._build_status_from_err(msg)
-            raise
-
-        if r.status_code != 200:
-            err_msg = ('%s Error: %d from GET %s: %s'
-                       % (self._name, r.status_code, url, r.text))
-            self._logger.error('%s Error: %d from GET %s: %s'
-                               % (self._name, r.status_code, url, r.text))
-            return {'status_code': -11, 'status_msg': err_msg}
-        else:
-            return r.json()
-
-    def _pce_post(self, endpoint, **kwargs):
-        """Execute JSON-formatted POST request to PCE endpoint.
-
-        Args:
-            endpoint (str): API URL endpoint for request. Must not have leading
-                or trailing slashes.
-            raw (bool): If True, return raw response, else return JSON portion
-                of response only.
-
-        Kwargs:
-            Key/val pairs in kwargs will be included as JSON key/val pairs in
-            the request body.
-
-        Returns:
-            'True' if request was successfully processed by RXing PCE, 'False'
-            if not.
-        """
-        s = requests.Session()
-        url = "%s/%s/" % (self._url, endpoint)
-        data = json.dumps(kwargs)
-        headers = {"content-type": "application/json"}
-        credentials = {
-            'servername': self._servername,
-            'username': self._username,
-            'password': self._password
-        }
-
-        try:
-            r = s.post(url, data=data, headers=headers,
-                       verify=self._get_cert_filename(),
-                       auth=(json.dumps(credentials),''))
-        except requests.exceptions.SSLError as e:
-            msg = get_requests_err_msg(e)
-            if msg.startswith('bad ca_certs'):
-                return self._build_status_from_err(msg)
-            raise
-
-        if r.status_code != 200:
-            self._logger.error('%s Error: %d from POST %s: %s'
-                               % (self._name, r.status_code, url, r.text))
-            return False
-
-        response = r.json()
-
-        if ((not response) or ('status_code' not in response.keys())
-            or (0 != response['status_code'])):
-            return False
-
-        return True
-
-    def _pce_delete(self, endpoint):
-        """Execute DELETE request to PCE endpoint.
-
-        Args:
-            endpoint (str): API URL endpoint for request. Must not have leading
-                or trailing slashes.
-        Returns:
-            'True' if request was successfully processed by RXing PCE, 'False'
-            if not.
-        """
-        s = requests.Session()
-        url = "%s/%s/" % (self._url, endpoint)
-        credentials = {
-            'servername': self._servername,
-            'username': self._username,
-            'password': self._password
-        }
-
-        try:
-            r = s.delete(url, verify=self._get_cert_filename(),
-                         auth=(json.dumps(credentials),''))
-        except requests.exceptions.SSLError as e:
-            msg = get_requests_err_msg(e)
-            if msg.startswith('bad ca_certs'):
-                return self._build_status_from_err(msg)
-            raise
-
-        if r.status_code != 200:
-            self._logger.error('%s Error: %d from DELETE %s: %s'
-                               % (self._name, r.status_code, url, r.text))
-            return False
-        else:
-            response = r.json()
-            if ((not response) or ('status_code' not in response.keys())
-                or (0 != response['status_code'])):
-                return False
-            return True
-
-    def _build_status_from_err(self, msg):
-        """Build and log requests SSLError response.
-
-        Some (all?) exceptions from the requests lib do not stick to typical
-        exception attrs (https://github.com/kennethreitz/requests/issues/3004),
-        thus, this is needed.
-
-        Args:
-            msg (str): requests SSLError message returned from
-                get_requests_err_msg().
-
-        Returns:
-            Minimal OnRamp-style JSON response object containing only status
-            info.
-        """
-        errno = -10
-        errmsg = 'SSL Certificate Error'
-        missing_filename = msg.split("bad ca_certs: '")[1].split("'")[0]
-        self._logger.error('%s Error: %s: File: %s'
-                           % (self._name, errmsg, missing_filename))
-        return {'status_code': errno, 'status_msg': errmsg}
-
-    def _get_cert_filename(self):
-        """Return the filename of the SSL certificate to be used by the
-        instance.
-        """
-        return os.path.join(server_root, self._cert_dir,
-                            '%d.crt' % self._pce_id)
-
-    def retrieve_cert(self, hostname, ssh_port, unix_user, unix_password,
-               onramp_base_dir=None):
-        """Retrieve, via SSH, the SSL certificate used by the given PCE.
-
-        Supports both password and pubkey SSH auth, however, cannot anticipate
-        which prior to call, thus, the unix_password arg will be submitted for
-        pubkey passphrase if requested, or for the account password if
-        requested.
-
-        Upon return, the retrieved SSL cert will be stored with the filename
-        returned by self._get_cert_filename().
-
-        Args:
-            hostname (str): Hostname/IP of the PCE.
-            ssh_port (int): PCE SSH daemon port.
-            unix_user (str): Username of account with SSH access to PCE host
-                and read access to the PCE OnRamp files.
-            unix_password (str): Unix account password or pubkey passphrase for
-                unix_user.
-
-        Kwargs:
-            onramp_base_dir (str): Root dir of OnRamp installation on PCE. If
-                'None', a default of '/home/%s/onramp' % unix_user is used.
-
-        Returns:
-            One of the following tuples:
-                (0, 'Success')
-                (-1, 'Bad onramp_base_dir: Should end with "onramp"')
-                (-2, 'Unexpected output when attempting to transfer cert')
-                (-3, 'Incorrect username/password given')
-                (-4, 'Connection refused')
-        """
-
-        if not onramp_base_dir:
-            onramp_base_dir = '/home/%s/onramp' % unix_user
-
-        while onramp_base_dir.endswith('/'):
-            onramp_base_dir = onramp_base_dir[:-1]
-        if not onramp_base_dir.endswith('onramp'):
-            return (-1, 'Bad onramp_base_dir: Should end with "onramp"')
-
-        # Retrieve SSL cert from PCE.
-        command = ('scp '
-            '-o StrictHostKeyChecking=no '
-            '-P %d '
-            '%s@%s:%s'
-            '/pce/src/keys/onramp_pce.crt '
-            '%s'
-            % (ssh_port, unix_user, hostname, onramp_base_dir,
-               self._get_cert_filename())
-        )
-        child = pexpect.spawn(command)
-        result = child.expect(['Password:', 'password:', 'Enter passphrase',
-                               'onramp_pce.crt', 'Connection refused'])
-
-        if result in [0,1,2]:
-            child.sendline(unix_password)
-            result = child.expect(['onramp_pce.crt', 'Password:', 'password:',
-                                   'Enter passphrase'])
-
-            if result == 0:
-                child.read()
-            elif result in [1,2,3]:
-                return (-3, 'Incorrect username/password given')
-            else:
-                return (-2, 'Unexpected output when attempting to transfer cert')
-
-        elif result == 3:
-            child.read()
-        elif result == 4:
-            return (-4, 'Connection refused')
-
-        else:
-            return (-2, 'Unexpected output when attempting to transfer cert')
-
-        return (0, 'Success')
-
-    def register_client(self, hostname, ssh_port, unix_user, unix_password,
-               onramp_base_dir=None):
-        """Register, using PCEAccess instance attrs, a PCE user on the PCE.
-
-        Supports both password and pubkey SSH auth, however, cannot anticipate
-        which prior to call, thus, the unix_password arg will be submitted for
-        pubkey passphrase if requested, or for the account password if
-        requested.
-
-        Args:
-            hostname (str): Hostname/IP of the PCE.
-            ssh_port (int): PCE SSH daemon port.
-            unix_user (str): Username of account with SSH access to PCE host
-                and read access to the PCE OnRamp files.
-            unix_password (str): Unix account password or pubkey passphrase for
-                unix_user.
-
-        Kwargs:
-            onramp_base_dir (str): Root dir of OnRamp installation on PCE. If
-                'None', a default of '/home/%s/onramp' % unix_user is used.
-
-        Returns:
-            One of the following tuples:
-                (0, 'Success')
-                (-1, 'Bad onramp_base_dir: Should end with "onramp"')
-                (-2, 'SERVERNAME/USERNAME already configured for client access')
-                (-3, 'PCE user registration sys error')
-                (-4, 'Registration info transfer error')
-                (-5, 'Incorrect connection/auth attrs given')
-                (-6, 'Unknown error occured during user registration')
-        """
-
-        if not onramp_base_dir:
-            onramp_base_dir = '/home/%s/onramp' % unix_user
-        while onramp_base_dir.endswith('/'):
-            onramp_base_dir = onramp_base_dir[:-1]
-        if not onramp_base_dir.endswith('onramp'):
-            return (-1, 'Bad onramp_base_dir: Should end with "onramp"')
-
-        child = pxssh.pxssh()
-        try:
-            child.login(hostname, unix_user, unix_password, port=ssh_port)
-            child.sendline('cd %s/pce' % onramp_base_dir)
-            child.prompt()
-            child.before
-            child.sendline('bin/onramp_pce_service.py addclient %s %s'
-                           % (self._servername, self._username))
-            result = child.expect([
-                'Password:',
-                ('Servername/Username pair "%s/%s" already configured for '
-                    'client access' % (self._servername, self._username)),
-                'Client password file "src/pce_client.pwd" has been corrupted'
-            ])
-            if result == 1:
-                child.logout()
-                return (-2, '%s/%s already configured for client access'
-                            % (self._servername, self._username))
-            if result == 2:
-                child.logout()
-                return (-3, 'PCE user registration sys error')
-
-            child.sendline(self._password)
-            child.expect('Verify Password:')
-            child.sendline(self._password)
-            result = child.expect([child.PROMPT, 'Password verification failed'])
-            if result == 1:
-                child.logout()
-                return (-4, 'Registration info transfer error')
-        except pexpect.exceptions.EOF:
-            child.logout()
-            return (-5, 'Incorrect connection/auth attrs given')
-        except pexpect.exceptions.TIMEOUT:
-            child.logout()
-            return (-6, 'Unknown error occured during user registration')
-            
-        child.logout()
-        return (0, 'Success')
-
     def get_modules_avail(self):
         """Return the list of modules that are available at the PCE but not
         currently installed.
@@ -418,10 +101,7 @@ class PCEAccess():
         Returns:
             List of JSON-formatted module objects. Returns 'None' on error.
         """
-        response = self._pce_get("modules", state="Available")
-        if (not response) or ("modules" not in response.keys()):
-            return None
-        return [mod for mod in response["modules"]]
+        return self._client.get_modules_avail()
 
     def get_modules(self, id=None):
         """Return the requested modules.
@@ -433,22 +113,7 @@ class PCEAccess():
             JSON-formatted module object for given id, or if no id given, list
             of JSON-formatted module objects. Returns 'None' on error.
         """
-        url = "modules"
-        if id:
-            url += "/%d" % id
-
-        response = self._pce_get(url)
-        if not response:
-            return None
-
-        if id:
-            if "module" not in response.keys():
-                return None
-            return response["module"]
-
-        if "modules" not in response.keys():
-            return None
-        return [mod for mod in response["modules"]]
+        return self._client.get_modules(id=id)
             
 
     def add_module(self, id, module_name, mod_type, mod_path):
@@ -466,15 +131,7 @@ class PCEAccess():
             'True' if installation request was successfully processed, 'False'
             if not.
         """
-        payload = {
-            'mod_id': id,
-            'mod_name': module_name,
-            'source_location': {
-                'type': mod_type,
-                'path': mod_path
-            }
-        }
-        return self._pce_post("modules", **payload)
+        return self._client.add_module(id, module_name, mod_type, mod_path)
 
     def deploy_module(self, id):
         """Initiate module deployment actions.
@@ -486,8 +143,7 @@ class PCEAccess():
             'True' if deployment request was successfully processed, 'False'
             if not.
         """
-        endpoint = "modules/%d" % id
-        return self._pce_post(endpoint)
+        return self._client.deploy_module(id)
 
     def delete_module(self, id):
         """Delete given module from PCE.
@@ -499,8 +155,7 @@ class PCEAccess():
             'True' if delete request was successfully processed, 'False'
             if not.
         """
-        endpoint = "modules/%d" % id
-        return self._pce_delete(endpoint)
+        return self._client.delete_module(id)
 
     def get_jobs(self, id):
         """Return the requested jobs.
@@ -512,16 +167,7 @@ class PCEAccess():
             JSON-formatted job object for given id, or if no id given, list
             of JSON-formatted job objects. Returns 'None' on error.
         """
-        url = "jobs/%d" % id
-
-        response = self._pce_get(url)
-
-        if not response:
-            return None
-        if "job" not in response.keys():
-            return None
-
-        return response["job"]
+        return self._client.get_jobs(id)
 
 
     def launch_job(self, user, mod_id, job_id, run_name, cfg_params=None):
@@ -538,15 +184,8 @@ class PCEAccess():
         Returns:
             'True' if launch request was successfully processed, 'False' if not.
         """
-        payload = {
-            'username': user,
-            'mod_id': mod_id,
-            'job_id': job_id,
-            'run_name': run_name
-        }
-        if cfg_params:
-            payload['cfg_params'] = cfg_params
-        return self._pce_post("jobs", **payload)
+        return self._client.launch_job(user, mod_id, job_id, run_name,
+                                       cfg_params=cfg_params)
 
     def delete_job(self, id):
         """Delete given job from PCE.
@@ -558,8 +197,7 @@ class PCEAccess():
             'True' if delete request was successfully processed, 'False'
             if not.
         """
-        endpoint = "jobs/%d" % id
-        return self._pce_delete(endpoint)
+        return self._client.delete_job(id)
 
     def ping(self):
         """Ping the given PCE.
@@ -568,9 +206,7 @@ class PCEAccess():
             True if able to succesfully connect via HTTP.
             False otherwise.
         """
-        endpoint = "cluster/ping"
-        result = self._pce_get(endpoint)
-        return result['status_code'] == 0
+        return self._client.ping()
 
 
     def check_connection(self):
@@ -580,10 +216,10 @@ class PCEAccess():
         Returns:
             True if connected, False if not.
         """
-        good_ping = self.ping()
+        good_ping = self._client.ping()
 
         self._logger.debug("%scheck_connection() %r from %s"
-                           % (self._name, good_ping, self._url))
+                           % (self._name, good_ping, self._client.get_url()))
 
         if good_ping:
             self._db.pce_update_state( self._pce_id, 0 ) # see onrampdb.py
@@ -623,17 +259,17 @@ class PCEAccess():
         if module_id is None:
             if avail is True:
                 self._logger.debug("%s Get all available modules" % prefix)
-                avail_mods = self.get_modules_avail()
+                avail_mods = self._client.get_modules_avail()
             else:
                 self._logger.debug("%s Get all modules" % prefix)
-                avail_mods = self.get_modules()
+                avail_mods = self._client.get_modules()
         else:
             self._logger.debug("%s Get module info for %s" % (prefix, str(module_id)))
             # JJH the below does not work as expected, so intead grab the whole
             #     list and extract just the one we care about
-            #avail_mods = self.get_modules( int(module_id) )
+            #avail_mods = self._client.get_modules( int(module_id) )
             module_id = int(module_id)
-            all_mods = self.get_modules()
+            all_mods = self._client.get_modules()
             avail_mods = None
             for m in all_mods:
                 m_id = self._db.module_lookup(m['mod_name'])
@@ -641,14 +277,14 @@ class PCEAccess():
                     avail_mods = m
                     #self._logger.debug("%s TESTING (1): %s" % (prefix, str(avail_mods)))
                     # JJH confirm this is the proper behavior
-                    avail_mods = self.get_modules( int(module_id) )
+                    avail_mods = self._client.get_modules( int(module_id) )
                     #self._logger.debug("%s TESTING (2): %s" % (prefix, str(avail_mods)))
                     self._logger.debug("%s Get module info for %s: Found (I)" % (prefix, str(module_id)))
                     break
 
             if avail_mods is None:
                 self._logger.debug("%s Get module info for %s: Searching Available" % (prefix, str(module_id)))
-                all_mods = self.get_modules_avail()
+                all_mods = self._client.get_modules_avail()
                 avail_mods = None
                 for m in all_mods:
                     m_id = self._db.module_lookup(m['mod_name'])
@@ -879,7 +515,7 @@ class PCEAccess():
         # Install the module (if it is not already installed)
         #
         if module_info["state"] <= 1:
-            rtn = self.add_module( module_info["module_id"], module_info["module_name"], module_info["src_location_type"], module_info["src_location_path"] )
+            rtn = self._client.add_module( module_info["module_id"], module_info["module_name"], module_info["src_location_type"], module_info["src_location_path"] )
             if rtn is False:
                 return {'error_msg' : "Failed to install the module"}
             self._logger.debug("%s Module %d installed" % (prefix, module_id) )
@@ -890,7 +526,7 @@ class PCEAccess():
         # Deploy the module (if it is not already deployed successfully)
         #
         if module_info["state"] not in [4, 5, 6]:
-            rtn = self.deploy_module(int(module_id))
+            rtn = self._client.deploy_module(int(module_id))
             if rtn is False:
                 return {'error_msg' : "Failed to deploy the module"}
             self._logger.debug("%s Module %d deployed" % (prefix, module_id) )
@@ -913,7 +549,7 @@ class PCEAccess():
     def _update_job_in_db(self, prefix, job_id):
 
         self._logger.debug("%s Checking on Job %d" % (prefix, job_id))
-        job = self.get_jobs(job_id)
+        job = self._client.get_jobs(job_id)
 
         self._logger.debug("%s job RAW %s" % (prefix, str(job)))
         self._save_job_output( job["job_id"], job["output"] )
@@ -1004,7 +640,7 @@ class PCEAccess():
         #
         if exists is False:
             self._logger.debug("%s Launching job ID %d on PCE... [exists=%s]" % (prefix, job_id, str(exists)))
-            result = self.launch_job(user_info["username"], module_id, job_id, run_name, cfg_params)
+            result = self._client.launch_job(user_info["username"], module_id, job_id, run_name, cfg_params)
             if result is False:
                 return {'error_msg' : "Failed to deploy the module"}
             
