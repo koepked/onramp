@@ -31,6 +31,10 @@ final_htaccess = ".htaccess"
 tmpl_conf  = "bin/onramp_server_config.cfg.tmpl"
 final_conf = "bin/onramp_server_config.cfg"
 
+pce_package_name = 'PCE'
+pce_dir = os.path.join(os.pardir, 'pce')
+pce_root = os.path.abspath(pce_dir)
+pce_source_dir = os.path.join(pce_dir, 'src')
 
 ###################################################
 #
@@ -117,11 +121,12 @@ call(['virtualenv', '-p', 'python2.7', env_dir])
 call([env_dir + '/bin/pip', 'install', '-r', source_dir + '/onramp_server_requirements.txt'])
 
 # Link Server to virtual environment
-# FIXME: This assumes python2.7. Need to find a way with virtualenv/pip to
-# enforce this.
 cwd = os.getcwd()
 call(['cp', '-rs', cwd + '/' + source_dir + '/' + package_name,
       env_dir + '/lib/python2.7/site-packages/' + package_name])
+# Link PCE to virtual environment
+call(['cp', '-rs', cwd + '/' + pce_source_dir + '/' + pce_package_name,
+      env_dir + '/lib/python2.7/site-packages/' + pce_package_name])
 
 # Create webapp_helper module in virtual environment
 mod_dir = os.path.join(env_dir, 'lib', 'python2.7', 'site-packages',
@@ -130,6 +135,13 @@ mod_file = os.path.join(mod_dir, '__init__.py')
 os.mkdir(mod_dir)
 with open(mod_file, 'w') as f:
     print>>f, "server_root = '%s'\n" % cwd
+# Create PCEhelper module in virtual environment if not already done by PCE
+mod_dir = os.path.join(env_dir, 'lib', 'python2.7', 'site-packages',
+                        'PCEHelper')
+mod_file = os.path.join(mod_dir, '__init__.py')
+os.mkdir(mod_dir)
+with open(mod_file, 'w') as f:
+    print>>f, "pce_root = '%s'\n" % pce_root
 
 # Use virtual environment to complete server setup
 call([env_dir + '/bin/python', source_dir + '/onramp_server_install_stage_two.py'])
