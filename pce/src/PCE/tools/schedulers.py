@@ -246,6 +246,7 @@ class SLURMScheduler(_BatchScheduler):
             return (-1, msg)
         return (0, result)
 
+
 class PBSScheduler(_BatchScheduler):
     @classmethod
     def is_scheduler_for(cls, type):
@@ -395,6 +396,92 @@ class PBSScheduler(_BatchScheduler):
             self.logger.error(msg)
             return (-1, msg)
         return (0, result)
+
+
+class DebugScheduler(_BatchScheduler):
+    @classmethod
+    def is_scheduler_for(cls, type):
+        """Return boolean indicating whether the class provides an interface to
+        the batch scheduler type given.
+
+        Args:
+            type (str): Batch scheduler type.
+
+        Returns:
+            True if class provides interface to given batch scheduler, False if
+            not.
+        """
+        return type == 'DEBUG'
+
+    def get_batch_script(self, run_name, numtasks=4, num_nodes=1, email=None):
+        """Return the batch script that runs a job as per args formatted for the
+        PBS batch scheduler.
+
+        Args:
+            run_name (str): Human-readable label for job run.
+            numtasks (int): Number of tasks to schedule.
+            num_nodes (int): Number of nodes to allocate for job.
+            email (str): Email to send results to upon completion. If None, no
+                email sent.
+
+        Returns:
+            Batch script implementing given attrs.
+        """
+        script += '################################################\n'
+        script += 'DEBUG BATCH SCRIPT\n'
+        script += 'run_name: %s\n' % run_name
+        script += 'numtasks: %s\n' % str(numtasks)
+        script += 'num_nodes: %s\n' % str(num_nodes)
+        script += 'email: %s\n' % email
+        script += '################################################\n'
+        script += '\n'
+        script += '%s bin/onramp_run.py\n' % self.local_python
+        return script
+
+    def schedule(self, proj_loc):
+        """Schedule a job using the PBS batch scheduler.
+
+        Args:
+            proj_loc (str): Folder containing the batch script 'script.sh' for
+                the job to schedule.
+
+        Returns:
+            Result dict with the following fields:
+                status_code: Status code
+                status_msg: String giving detailed status info.
+        """
+        return {
+            'status_code': 0,
+            'status_msg': 'DEBUG Job 9999 simulated at location %s' % proj_loc
+            'job_num': 9999
+        }
+
+    def check_status(self, scheduler_job_num):
+        """Return job status from scheduler.
+
+        Args:
+            scheduler_job_num (int): Job number of the job to check state on as
+                given by the scheduler, not as given by OnRamp.
+
+        Returns:
+            2-Tuple with 0th item being error code and 1st item being a string
+            giving detailed status info.
+        """
+        return (0, 'Done')
+
+    def cancel_job(self, scheduler_job_num):
+        """Cancel the given job.
+    
+        Args:
+            scheduler_job_num (int): Job number, as given by the scheduler, of the
+                job to cancel.
+
+        Returns:
+            2-Tuple with 0th item being error code and 1st item being a string
+            giving detailed status info.
+        """
+        return (0, 'Cancelled')
+
 
 def Scheduler(type):
     """Instantiate the appropriate scheduler class for given type.
