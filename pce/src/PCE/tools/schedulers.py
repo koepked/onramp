@@ -452,7 +452,7 @@ class DebugScheduler(_BatchScheduler):
         """
         return {
             'status_code': 0,
-            'status_msg': 'DEBUG Job 9999 simulated at location %s' % proj_loc
+            'status_msg': 'DEBUG Job 9999 simulated at location %s' % proj_loc,
             'job_num': 9999
         }
 
