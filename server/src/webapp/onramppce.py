@@ -6,34 +6,11 @@ Exports:
 import json
 import os
 import pexpect
-import requests
 import time
 
 from pexpect import pxssh
 from webapp_helper import server_root
 from PCE.tools import PCEClient
-
-# The stdlib's ssl module has some limitations which are adressed by PyOpenSSL.
-# The following gets the requests lib to get the urllib3 lib to use PyOpenSSL
-# bindings instead.
-#
-# Reference: https://urllib3.readthedocs.org/en/latest/security.html#pyopenssl
-requests.packages.urllib3.contrib.pyopenssl.inject_into_urllib3()
-
-def get_requests_err_msg(ex):
-    """Return a sensible error message from a requests lib SSLError.
-
-    Some (all?) exceptions from the requests lib do not stick to typical
-    exception attrs (https://github.com/kennethreitz/requests/issues/3004),
-    thus, this is needed.
-    """
-    error_number = None
-    current_error = ex
-    while isinstance(current_error, Exception) and error_number is None:
-        error_number = getattr(current_error, 'errno', None)
-        current_error = current_error.args[0]
-
-    return current_error
 
 class PCEAccess():
     """Client-side interface to OnRamp PCE server.
@@ -78,9 +55,10 @@ class PCEAccess():
         self._pce_id = int(pce_id)
 
         pce_info = self._db.pce_get_info(pce_id)
-        self._client = PCEClient(logger, pce_info['data'][2],
-                                 pce_info['data'][3], pce_id, servername,
-                                 username, password)
+        self._client = PCEClient(logger,
+                                 os.path.join(server_root, 'src', 'certs'),
+                                 pce_info['data'][2], pce_info['data'][3],
+                                 pce_id, servername, username, password)
 
         self._tmp_dir = tmp_dir
         self._pce_dir = os.path.join(self._tmp_dir, "tmp", "pce", str(self._pce_id))

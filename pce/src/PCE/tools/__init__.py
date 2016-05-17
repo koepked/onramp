@@ -18,6 +18,7 @@ import hashlib
 import json
 import logging
 import os
+import requests
 from datetime import datetime
 from subprocess import CalledProcessError, call, check_output
 
@@ -86,6 +87,29 @@ def module_log(mod_root, log_id, msg):
         f.write('The following output was logged %s:\n\n' % str(datetime.now()))
         f.write(msg)
 
+# The stdlib's ssl module has some limitations which are adressed by PyOpenSSL.
+# The following gets the requests lib to get the urllib3 lib to use PyOpenSSL
+# bindings instead.
+#
+# Reference: https://urllib3.readthedocs.org/en/latest/security.html#pyopenssl
+requests.packages.urllib3.contrib.pyopenssl.inject_into_urllib3()
+
+def get_requests_err_msg(ex):
+    """Return a sensible error message from a requests lib SSLError.
+
+    Some (all?) exceptions from the requests lib do not stick to typical
+    exception attrs (https://github.com/kennethreitz/requests/issues/3004),
+    thus, this is needed.
+    """
+    error_number = None
+    current_error = ex
+    while isinstance(current_error, Exception) and error_number is None:
+        error_number = getattr(current_error, 'errno', None)
+        current_error = current_error.args[0]
+
+    return current_error
+
+
 class PCEClient():
     """Client-side interface to OnRamp PCE server.
 
@@ -108,8 +132,8 @@ class PCEClient():
     _name = "[PCEClient] "
     _cert_dir = "src/certs"
     
-    def __init__(self, logger, pce_hostname, pce_port, pce_id, servername,
-                 username, password):
+    def __init__(self, logger, cert_dir, pce_hostname, pce_port, pce_id,
+    			 servername, username, password):
         """Initialize PCEClient instance.
 
         Args:
@@ -119,6 +143,7 @@ class PCEClient():
                 exist in DB provided by dbaccess.
         """
         self._logger = logger
+        self._cert_dir = cert_dir
         self._pce_id = int(pce_id)
         self._servername = servername
         self._username = username
@@ -281,8 +306,7 @@ class PCEClient():
         """Return the filename of the SSL certificate to be used by the
         instance.
         """
-        return os.path.join(server_root, self._cert_dir,
-                            '%d.crt' % self._pce_id)
+        return os.path.join(self._cert_dir, '%d.crt' % self._pce_id)
 
     def get_url(self):
         return self._url
