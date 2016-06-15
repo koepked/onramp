@@ -680,7 +680,7 @@ def _gen_access_token():
         except KeyError as e:
             # New token not presently a key in json dict. Add it.
             data[new_token] = True
-            print new_token
+            print 'Access token: ' + new_token
 
         if attempts >= max_attempts:
             handle_err('Exceeded max attempts at token generation', pwd_file)
