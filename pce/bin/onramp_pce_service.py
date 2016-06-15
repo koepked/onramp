@@ -634,67 +634,57 @@ def _updatessl():
     ret_code = call(['cp', args.key, pce_key_file])
     ret_code = call(['cp', args.cert, pce_cert_file])
 
-def _addclient():
-    """Configure access for a PCE service client.
-
-    positional arguments:
-      servername
-      username
+def _gen_access_token():
+    """Generate access token for a PCE service client.
 
     optional arguments:
       -h, --help  show this help message and exit
     """
-    pce_client_pwd_file = 'src/pce_client.pwd'
+    access_token_file = 'src/pce_client.pwd'
     pwd_lock_file = 'src/pwd.lock'
-    descrip = 'Configure access for a PCE service client'
+    descrip = 'Generate access token for a PCE service client'
+    max_attempts = 10
 
     def handle_err(msg, f):
         f.close()
         sys.exit(msg)
 
-    parser = argparse.ArgumentParser(prog='onramp_pce_service.py addclient',
+    parser = argparse.ArgumentParser(prog='onramp_pce_service.py gentoken',
                                      description=descrip)
-    parser.add_argument('servername')
-    parser.add_argument('username')
     args = parser.parse_args(args=sys.argv[2:])
 
     with open(pwd_lock_file, 'a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         try:
-            pwd_file = open(pce_client_pwd_file, 'r+')
+            pwd_file = open(access_token_file, 'r+')
             try:
                 data = json.load(pwd_file)
             except:
-                handle_err('Client password file "%s" has been corrupted'
-                           % pce_client_pwd_file, pwd_file)
+                handle_err('Access token file "%s" has been corrupted'
+                           % access_token_file, pwd_file)
         except IOError as e:
             if e.errno == 2:
                 # File does not exist
-                pwd_file = open(pce_client_pwd_file, 'w')
+                pwd_file = open(access_token_file, 'w')
                 data = {}
             else:
                 handle_err(e, pwd_file)
 
-        if (args.servername in data.keys() and
-            args.username in data[args.servername].keys()):
+        # Generate new unique token.
+        new_token = bcrypt.hashpw(bcrypt.gensalt(), bcrypt.gensalt())
+        attempts = 0
+        try:
+            while attempts < max_attempts and data[new_token]:
+                new_token = bcrypt.hashpw(bcrypt.gensalt(), bcrypt.gensalt())
+                attempts += 1
+        except KeyError as e:
+            # New token not presently a key in json dict. Add it.
+            data[new_token] = True
+            print new_token
 
-            handle_err('Servername/Username pair "%s/%s" already configured '
-                       'for client access' % (args.servername, args.username),
-                       pwd_file)
-
-        pwd = getpass()
-        pwd_verify = getpass('Verify Password: ')
-
-        if not pwd == pwd_verify:
-            handle_err('Password verification failed', pwd_file)
-
-        hashed = bcrypt.hashpw(pwd, bcrypt.gensalt())
-
-        if args.servername in data.keys():
-            data[args.servername].update({args.username: {'pwd':hashed}})
-        else:
-            data[args.servername] = {args.username: {'pwd': hashed}}
-
+        if attempts >= max_attempts:
+            handle_err('Exceeded max attempts at token generation', pwd_file)
+                
         pwd_file.seek(0)
         json.dump(data, pwd_file)
         pwd_file.truncate()
@@ -713,7 +703,7 @@ switch = {
     'jobdelete': _job_delete,
     'shell': _shell,
     'updatessl': _updatessl,
-    'addclient': _addclient
+    'gentoken': _gen_access_token
 }
 
 if __name__ == '__main__':
