@@ -411,13 +411,11 @@ class PCEClient():
 
         Returns:
             One of the following tuples:
-                (0, 'Success')
+                (0, REGISTERED_AUTH_TOKEN)
                 (-1, 'Bad onramp_base_dir: Should end with "onramp"')
-                (-2, 'SERVERNAME/USERNAME already configured for client access')
-                (-3, 'PCE user registration sys error')
-                (-4, 'Registration info transfer error')
-                (-5, 'Incorrect connection/auth attrs given')
-                (-6, 'Unknown error occured during user registration')
+                (-2, 'PCE user registration sys error')
+                (-3, 'Incorrect connection/auth attrs given')
+                (-4, 'Unknown error occured during user registration')
         """
 
         if not onramp_base_dir:
@@ -433,38 +431,32 @@ class PCEClient():
             child.sendline('cd %s/pce' % onramp_base_dir)
             child.prompt()
             child.before
-            child.sendline('bin/onramp_pce_service.py addclient %s %s'
-                           % (self._servername, self._username))
+            child.sendline('bin/onramp_pce_service.py gentoken'
             result = child.expect([
-                'Password:',
-                ('Servername/Username pair "%s/%s" already configured for '
-                    'client access' % (self._servername, self._username)),
-                'Client password file "src/pce_client.pwd" has been corrupted'
+                'Access token: .*',
+                'Exceeded max attempts at token generation',
+                'Access token file "src/pce_client.pwd" has been corrupted',
+                '.*'
             ])
-            if result == 1:
-                child.logout()
-                return (-2, '%s/%s already configured for client access'
-                            % (self._servername, self._username))
-            if result == 2:
-                child.logout()
-                return (-3, 'PCE user registration sys error')
 
-            child.sendline(self._password)
-            child.expect('Verify Password:')
-            child.sendline(self._password)
-            result = child.expect([child.PROMPT, 'Password verification failed'])
-            if result == 1:
+            if result == 1 or result == 2:
                 child.logout()
-                return (-4, 'Registration info transfer error')
+                return (-2, 'PCE user registration sys error')
+            if result == 3:
+                child.logout()
+                return (-4, 'Unknown error occured during user registration')
+
+            token = child.after.split(token_preamble)[1]
+
         except pexpect.exceptions.EOF:
             child.logout()
-            return (-5, 'Incorrect connection/auth attrs given')
+            return (-3, 'Incorrect connection/auth attrs given')
         except pexpect.exceptions.TIMEOUT:
             child.logout()
-            return (-6, 'Unknown error occured during user registration')
+            return (-4, 'Unknown error occured during user registration')
             
         child.logout()
-        return (0, 'Success')
+        return (0, token)
 
     def get_modules_avail(self):
         """Return the list of modules that are available at the PCE but not
