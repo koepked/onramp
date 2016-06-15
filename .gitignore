@@ -14,19 +14,20 @@
 # Generated files
 *.pyc
 *.nfs*
-pce/users
-pce/modules
+*.pem
+pce/bin/onramp_pce_config.cfg
+pce/docs/build
 pce/log
+pce/modules
+pce/src/.*.pid
 pce/src/env
+pce/src/keys
+pce/src/openssl.cnf
 pce/src/pce_client.pwd
 pce/src/pwd.lock
-pce/src/.*.pid
-pce/src/testing/deploy
 pce/src/state
-pce/src/keys
-pce/docs/build
-pce/bin/onramp_pce_config.cfg
-*.pem
+pce/src/testing/deploy
+pce/users
 
 server/tmp
 server/tmp/users
