@@ -88,6 +88,36 @@ if __name__ == '__main__':
     response = raw_input('(G)enerate SSL key/cert pair or (U)se existing? ')
 
     if response == 'g' or response == 'G':
+        alt_names = []
+        num_ips = 1
+        num_hostnames = 1
+        response = raw_input('Add alternative hostnames or IPs to the generated'
+                             ' SSL certificate (Y/N)? ')
+        while response is not 'n' and response is not 'N':
+            response = raw_input('Alternative name type ((I)P or (H)ostname): ')
+            if response is 'I' or response is 'i':
+                altname = raw_input('IP address: ')
+                num_ips += 1
+                alt_names.append('IP.%d = %s' % (num_ips, altname))
+            elif response is 'H' or response is 'h':
+                altname = raw_input('Hostname: ')
+                num_hostnames += 1
+                alt_names.append('DNS.%d = %s' % (num_hostnames, altname))
+            else:
+                print 'Invalid alternative name type'
+
+            response = raw_input('Add additional hostnames or IPs to the '
+                                 'generated SSL certificate (Y/N)? ')
+
+        with open(os.path.join('src', 'openssl.cnf.tmpl'), 'r') as f:
+            ssl_conf = f.read()
+
+        if alt_names:
+            ssl_conf += '\n'.join(alt_names)
+
+        with open(os.path.join('src', 'openssl.cnf'), 'w') as f:
+            f.write(ssl_conf)
+
         ret_code = call([cert_gen_script])
         if ret_code != 0:
             sys.exit('FAIL: Error generating self signed certificate')
