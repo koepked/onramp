@@ -431,7 +431,7 @@ class PCEClient():
             child.sendline('cd %s/pce' % onramp_base_dir)
             child.prompt()
             child.before
-            child.sendline('bin/onramp_pce_service.py gentoken'
+            child.sendline('bin/onramp_pce_service.py gentoken')
             result = child.expect([
                 'Access token: .*',
                 'Exceeded max attempts at token generation',
