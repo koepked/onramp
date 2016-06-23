@@ -45,7 +45,6 @@ Commands:
         Configure access for a PCE service client.
 """
 import argparse
-import bcrypt
 import fcntl
 import json
 import logging
@@ -53,6 +52,7 @@ import os
 import shutil
 import sys
 import time
+import uuid
 from subprocess import CalledProcessError, call, check_output
 from tempfile import TemporaryFile, mkstemp
 
@@ -671,11 +671,11 @@ def _gen_access_token():
                 handle_err(e, pwd_file)
 
         # Generate new unique token.
-        new_token = bcrypt.hashpw(bcrypt.gensalt(), bcrypt.gensalt())
+        new_token = uuid.uuid4().hex
         attempts = 0
         try:
             while attempts < max_attempts and data[new_token]:
-                new_token = bcrypt.hashpw(bcrypt.gensalt(), bcrypt.gensalt())
+                new_token = uuid.uuid4().hex
                 attempts += 1
         except KeyError as e:
             # New token not presently a key in json dict. Add it.
