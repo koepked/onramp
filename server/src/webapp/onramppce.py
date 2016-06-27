@@ -39,9 +39,12 @@ class PCEAccess():
     _pce_module_dir = ""
     _pce_job_dir = ""
     _cert_dir = "src/certs"
+
+    @classmethod
+    def register_client(cls, url, username, password):
+        return PCEClient.register_client(url, username, password)
     
-    def __init__(self, logger, dbaccess, pce_id, tmp_dir, servername, username,
-                 password):
+    def __init__(self, logger, dbaccess, pce_id, tmp_dir, access_token):
         """Initialize PCEAccess instance.
 
         Args:
@@ -58,7 +61,7 @@ class PCEAccess():
         self._client = PCEClient(logger,
                                  os.path.join(server_root, 'src', 'certs'),
                                  pce_info['data'][2], pce_info['data'][3],
-                                 pce_id, servername, username, password)
+                                 pce_id, access_token)
 
         self._tmp_dir = tmp_dir
         self._pce_dir = os.path.join(self._tmp_dir, "tmp", "pce", str(self._pce_id))
