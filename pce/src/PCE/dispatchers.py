@@ -33,18 +33,16 @@ def auth_required(method):
     def validate(self, *args, **kwargs):
         try:
             auth = cherrypy.request.headers['Authorization']
-
-            # Parse JSON string from Authorization header.
             credentials_str = b64decode(auth.split('Basic ')[1])[:-1]
+            credentials = credentials_str.split(':')
 
-            credentials = json.loads(credentials_str)
-            servername = credentials['servername']
-            username = credentials['username']
-            password = credentials['password'].encode('utf-8')
+            assert credentials[0] = 'Token'
+
+            token = credentials[1]
+
             with open(os.path.join(pce_root, PWD_FILE), 'r') as f:
                 pwd = json.load(f)
-            hashed = pwd[servername][username]['pwd'].encode('utf-8')
-            assert bcrypt.hashpw(password, hashed) == hashed
+                assert pwd[token]
 
         except:
             raise cherrypy.HTTPError("401 Unauthorized")
