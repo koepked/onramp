@@ -18,8 +18,11 @@ import hashlib
 import json
 import logging
 import os
+import pexpect
 import requests
+
 from datetime import datetime
+from pexpect import pxssh
 from subprocess import CalledProcessError, call, check_output
 
 from configobj import ConfigObj
@@ -131,9 +134,80 @@ class PCEClient():
     """
     _name = "[PCEClient] "
     _cert_dir = "src/certs"
-    
+
+    @classmethod
+    def register_client(cls, hostname, unix_user, unix_password, ssh_port=22,
+                        onramp_base_dir=None):
+        """Register, using PCEClient instance attrs, a PCE user on the PCE.
+
+        Supports both password and pubkey SSH auth, however, cannot anticipate
+        which prior to call, thus, the unix_password arg will be submitted for
+        pubkey passphrase if requested, or for the account password if
+        requested.
+
+        Args:
+            hostname (str): Hostname/IP of the PCE.
+            ssh_port (int): PCE SSH daemon port.
+            unix_user (str): Username of account with SSH access to PCE host
+                and read access to the PCE OnRamp files.
+            unix_password (str): Unix account password or pubkey passphrase for
+                unix_user.
+
+        Kwargs:
+            onramp_base_dir (str): Root dir of OnRamp installation on PCE. If
+                'None', a default of '/home/%s/onramp' % unix_user is used.
+
+        Returns:
+            One of the following tuples:
+                (0, REGISTERED_AUTH_TOKEN)
+                (-1, 'Bad onramp_base_dir: Should end with "onramp"')
+                (-2, 'PCE user registration sys error')
+                (-3, 'Incorrect connection/auth attrs given')
+                (-4, 'Unknown error occured during user registration')
+        """
+
+        if not onramp_base_dir:
+            onramp_base_dir = '/home/%s/onramp' % unix_user
+        while onramp_base_dir.endswith('/'):
+            onramp_base_dir = onramp_base_dir[:-1]
+        if not onramp_base_dir.endswith('onramp'):
+            return (-1, 'Bad onramp_base_dir: Should end with "onramp"')
+
+        child = pxssh.pxssh()
+        try:
+            child.login(hostname, unix_user, unix_password, port=ssh_port)
+            child.sendline('cd %s/pce' % onramp_base_dir)
+            child.prompt()
+            child.before
+            child.sendline('bin/onramp_pce_service.py gentoken')
+            result = child.expect([
+                'Access token: .*',
+                'Exceeded max attempts at token generation',
+                'Access token file "src/pce_client.pwd" has been corrupted',
+                '.*'
+            ])
+
+            if result == 1 or result == 2:
+                child.logout()
+                return (-2, 'PCE user registration sys error')
+            if result == 3:
+                child.logout()
+                return (-4, 'Unknown error occured during user registration')
+
+            token = child.after.split(token_preamble)[1]
+
+        except pexpect.exceptions.EOF:
+            child.logout()
+            return (-3, 'Incorrect connection/auth attrs given')
+        except pexpect.exceptions.TIMEOUT:
+            child.logout()
+            return (-4, 'Unknown error occured during user registration')
+            
+        child.logout()
+        return (0, token)
+
     def __init__(self, logger, cert_dir, pce_hostname, pce_port, pce_id,
-    			 servername, username, password):
+    			 access_token):
         """Initialize PCEClient instance.
 
         Args:
@@ -145,9 +219,7 @@ class PCEClient():
         self._logger = logger
         self._cert_dir = cert_dir
         self._pce_id = int(pce_id)
-        self._servername = servername
-        self._username = username
-        self._password = password
+        self._access_token = access_token
         self._url = "https://%s:%d" % (pce_hostname, pce_port)
 
     def _pce_get(self, endpoint, **kwargs):
@@ -168,15 +240,10 @@ class PCEClient():
         """
         s = requests.Session()
         url = "%s/%s/" % (self._url, endpoint)
-        credentials = {
-            'servername': self._servername,
-            'username': self._username,
-            'password': self._password
-        }
 
         try:
             r = s.get(url, params=kwargs, verify=self._get_cert_filename(),
-                      auth=(json.dumps(credentials),''))
+                      auth=('Token', self._access_token))
         except requests.exceptions.SSLError as e:
             msg = get_requests_err_msg(e)
             if msg.startswith('bad ca_certs'):
@@ -213,16 +280,11 @@ class PCEClient():
         url = "%s/%s/" % (self._url, endpoint)
         data = json.dumps(kwargs)
         headers = {"content-type": "application/json"}
-        credentials = {
-            'servername': self._servername,
-            'username': self._username,
-            'password': self._password
-        }
 
         try:
             r = s.post(url, data=data, headers=headers,
                        verify=self._get_cert_filename(),
-                       auth=(json.dumps(credentials),''))
+                       auth=('Token', self._access_token))
         except requests.exceptions.SSLError as e:
             msg = get_requests_err_msg(e)
             if msg.startswith('bad ca_certs'):
@@ -254,15 +316,10 @@ class PCEClient():
         """
         s = requests.Session()
         url = "%s/%s/" % (self._url, endpoint)
-        credentials = {
-            'servername': self._servername,
-            'username': self._username,
-            'password': self._password
-        }
 
         try:
             r = s.delete(url, verify=self._get_cert_filename(),
-                         auth=(json.dumps(credentials),''))
+                         auth=('Token', self._access_token))
         except requests.exceptions.SSLError as e:
             msg = get_requests_err_msg(e)
             if msg.startswith('bad ca_certs'):
@@ -387,76 +444,6 @@ class PCEClient():
             return (-2, 'Unexpected output when attempting to transfer cert')
 
         return (0, 'Success')
-
-    def register_client(self, hostname, ssh_port, unix_user, unix_password,
-               onramp_base_dir=None):
-        """Register, using PCEClient instance attrs, a PCE user on the PCE.
-
-        Supports both password and pubkey SSH auth, however, cannot anticipate
-        which prior to call, thus, the unix_password arg will be submitted for
-        pubkey passphrase if requested, or for the account password if
-        requested.
-
-        Args:
-            hostname (str): Hostname/IP of the PCE.
-            ssh_port (int): PCE SSH daemon port.
-            unix_user (str): Username of account with SSH access to PCE host
-                and read access to the PCE OnRamp files.
-            unix_password (str): Unix account password or pubkey passphrase for
-                unix_user.
-
-        Kwargs:
-            onramp_base_dir (str): Root dir of OnRamp installation on PCE. If
-                'None', a default of '/home/%s/onramp' % unix_user is used.
-
-        Returns:
-            One of the following tuples:
-                (0, REGISTERED_AUTH_TOKEN)
-                (-1, 'Bad onramp_base_dir: Should end with "onramp"')
-                (-2, 'PCE user registration sys error')
-                (-3, 'Incorrect connection/auth attrs given')
-                (-4, 'Unknown error occured during user registration')
-        """
-
-        if not onramp_base_dir:
-            onramp_base_dir = '/home/%s/onramp' % unix_user
-        while onramp_base_dir.endswith('/'):
-            onramp_base_dir = onramp_base_dir[:-1]
-        if not onramp_base_dir.endswith('onramp'):
-            return (-1, 'Bad onramp_base_dir: Should end with "onramp"')
-
-        child = pxssh.pxssh()
-        try:
-            child.login(hostname, unix_user, unix_password, port=ssh_port)
-            child.sendline('cd %s/pce' % onramp_base_dir)
-            child.prompt()
-            child.before
-            child.sendline('bin/onramp_pce_service.py gentoken')
-            result = child.expect([
-                'Access token: .*',
-                'Exceeded max attempts at token generation',
-                'Access token file "src/pce_client.pwd" has been corrupted',
-                '.*'
-            ])
-
-            if result == 1 or result == 2:
-                child.logout()
-                return (-2, 'PCE user registration sys error')
-            if result == 3:
-                child.logout()
-                return (-4, 'Unknown error occured during user registration')
-
-            token = child.after.split(token_preamble)[1]
-
-        except pexpect.exceptions.EOF:
-            child.logout()
-            return (-3, 'Incorrect connection/auth attrs given')
-        except pexpect.exceptions.TIMEOUT:
-            child.logout()
-            return (-4, 'Unknown error occured during user registration')
-            
-        child.logout()
-        return (0, token)
 
     def get_modules_avail(self):
         """Return the list of modules that are available at the PCE but not
