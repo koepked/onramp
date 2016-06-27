@@ -578,6 +578,36 @@ class Database_sqlite(onrampdb.Database):
 
         return rowid
 
+    def update_pce_access_token(self, pce_id, token):
+        self._logger.debug(self._name + "update_pce_access_token (" + str(pce_id) + ")")
+
+        sql = "UPDATE pce SET access_token = ? WHERE pce_id = ?"
+        args = (access_token, pce_id)
+
+        self._logger.debug(self._name + " " + sql)
+        
+        self._connect()
+        self._cursor.execute(sql, args )
+        rowid = self._cursor.lastrowid
+        self._disconnect()
+
+        return rowid
+
+    def get_pce_access_token(self, pce_id):
+        self._logger.debug(self._name + "get_pce_access_token (" + str(pce_id) + ")")
+
+        sql = "SELECT access_token FROM pce WHERE pce_id = ?"
+        args = (pce_id,)
+
+        self._logger.debug(self._name + " " + sql)
+        
+        self._connect()
+        self._cursor.execute(sql, args )
+        token = self._cursor.fetchone()[0]
+        self._disconnect()
+
+        return token
+
     def add_module_to_pce(self, pce_id, module_id, src_location_type='local', src_location_path=''):
         self._logger.debug(self._name + "add_module_to_pce (" + str(module_id) +" in " + str(pce_id) + ")")
 

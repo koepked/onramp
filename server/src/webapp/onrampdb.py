@@ -734,6 +734,20 @@ class DBAccess():
         pce_info = self._db.update_pce_state(pce_id, state)
         self._db.disconnect()
         return pce_info
+    
+    ##########################################
+    def pce_update_access_token(self, pce_id, token):
+        self._db.connect()
+        result_id = self._db.update_pce_access_token(pce_id, token)
+        self._db.disconnect()
+        return result_id
+
+    ##########################################
+    def pce_get_access_token(self, pce_id):
+        self._db.connect()
+        token = self._db.get_pce_access_token(pce_id)
+        self._db.disconnect()
+        return token
 
     ##########################################
     def pce_get_doc(self, pce_id):
