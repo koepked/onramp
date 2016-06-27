@@ -51,7 +51,7 @@ CREATE TABLE pce (
     location     text DEFAULT '',
     description  text DEFAULT '',
 
-    -- TODO: UNIX Auth?
+    access_token text DEFAULT '',
     pce_username text DEFAULT 'onramp',
 
     -- TODO: Files?
