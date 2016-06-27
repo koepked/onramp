@@ -83,7 +83,9 @@ class _ServerResourceBase:
         if len(all_pce_ids) <= 0:
             self.logger.info("No PCE Connections Available")
         for pce_id in all_pce_ids:
-            self._pces[pce_id] = onramppce.PCEAccess(self.logger, self._db, pce_id, self._tmp_dir)
+            access_token = self._db.pce_get_access_token(pce_id)
+            self._pces[pce_id] = onramppce.PCEAccess(self.logger, self._db, pce_id, self._tmp_dir,
+                                                     access_token)
 
     def _get_is_valid_fns(self):
         return {'user' :      self._db.is_valid_user_id,
@@ -584,7 +586,9 @@ class PCEs(_ServerResourceBase):
             if pce_id in self._pces:
                 self._pces[pce_id].check_connection()
             else:
-                self._pces[pce_id] = onramppce.PCEAccess(self.logger, self._db, pce_id, self._tmp_dir)
+                access_token = self._db.pce_get_access_token(pce_id)
+                self._pces[pce_id] = onramppce.PCEAccess(self.logger, self._db, pce_id, self._tmp_dir,
+                                                         access_token)
                 self._pces[pce_id].check_connection()
 
             #
@@ -619,7 +623,9 @@ class PCEs(_ServerResourceBase):
             if pce_id in self._pces:
                 self._pces[pce_id].check_connection()
             else:
-                self._pces[pce_id] = onramppce.PCEAccess(self.logger, self._db, pce_id, self._tmp_dir)
+                access_token = self._db.pce_get_access_token(pce_id)
+                self._pces[pce_id] = onramppce.PCEAccess(self.logger, self._db, pce_id, self._tmp_dir,
+                                                         access_token)
                 self._pces[pce_id].check_connection()
 
             #
@@ -1009,7 +1015,9 @@ class Jobs(_ServerResourceBase):
             if pce_id in self._pces:
                 self._pces[pce_id].check_connection()
             else:
-                self._pces[pce_id] = onramppce.PCEAccess(self.logger, self._db, pce_id, self._tmp_dir)
+                access_token = self._db.pce_get_access_token(pce_id)
+                self._pces[pce_id] = onramppce.PCEAccess(self.logger, self._db, pce_id, self._tmp_dir,
+                                                         access_token)
                 self._pces[pce_id].check_connection()
 
             # Ask the PCE
@@ -1047,7 +1055,9 @@ class Jobs(_ServerResourceBase):
             if pce_id in self._pces:
                 self._pces[pce_id].check_connection()
             else:
-                self._pces[pce_id] = onramppce.PCEAccess(self.logger, self._db, pce_id, self._tmp_dir)
+                access_token = self._db.pce_get_access_token(pce_id)
+                self._pces[pce_id] = onramppce.PCEAccess(self.logger, self._db, pce_id, self._tmp_dir,
+                                                         access_token)
                 self._pces[pce_id].check_connection()
 
             # Ask the PCE                                                                                                        
@@ -1154,7 +1164,9 @@ class Jobs(_ServerResourceBase):
         if pce_id in self._pces:
             self._pces[pce_id].check_connection()
         else:
-            self._pces[pce_id] = onramppce.PCEAccess(self.logger, self._db, pce_id, self._tmp_dir)
+            access_token = self._db.pce_get_access_token(pce_id)
+            self._pces[pce_id] = onramppce.PCEAccess(self.logger, self._db, pce_id, self._tmp_dir,
+                                                     access_token)
             self._pces[pce_id].check_connection()
 
         #
@@ -1531,8 +1543,18 @@ class Admin(_ServerResourceBase):
             if rdata['exists'] is True:
                 self._pces[pce_id].check_connection()
             else:
-                self._pces[pce_id] = onramppce.PCEAccess(self.logger, self._db, pce_id, self._tmp_dir)
-                self._pces[pce_id].establish_connection()
+                reg_result = onramppce.PCEAccess.register_client(data['url'],
+                                data['pce_username'], data['pce_password'])
+                if reg_result[0] == 0:
+                    access_token = reg_result[1]
+                    self._db.pce_update_access_token(pce_id, access_token)
+                    self._pces[pce_id] = onramppce.PCEAccess(self.logger,
+                                            self._db, pce_id, self._tmp_dir,
+                                            access_token)
+                    self._pces[pce_id].establish_connection()
+                else:
+                    self.logger.error('%s %s' % (prefix, reg_result[1]))
+                    self._db.pce_update_state(pce_id, 2)
 
             rdata['state'] = self._db.pce_get_state(pce_id)
         #
@@ -1553,7 +1575,9 @@ class Admin(_ServerResourceBase):
             if pce_id in self._pces:
                 self._pces[pce_id].check_connection()
             else:
-                self._pces[pce_id] = onramppce.PCEAccess(self.logger, self._db, pce_id, self._tmp_dir)
+                access_token = self._db.pce_get_access_token(pce_id)
+                self._pces[pce_id] = onramppce.PCEAccess(self.logger, self._db, pce_id, self._tmp_dir,
+                                                         access_token)
                 self._pces[pce_id].check_connection()
 
             #
