@@ -36,7 +36,7 @@ def auth_required(method):
             credentials_str = b64decode(auth.split('Basic ')[1])[:-1]
             credentials = credentials_str.split(':')
 
-            assert credentials[0] = 'Token'
+            assert credentials[0] == 'Token'
 
             token = credentials[1]
 
