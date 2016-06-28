@@ -582,7 +582,7 @@ class Database_sqlite(onrampdb.Database):
         self._logger.debug(self._name + "update_pce_access_token (" + str(pce_id) + ")")
 
         sql = "UPDATE pce SET access_token = ? WHERE pce_id = ?"
-        args = (access_token, pce_id)
+        args = (token, pce_id)
 
         self._logger.debug(self._name + " " + sql)
         

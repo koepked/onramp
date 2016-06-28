@@ -173,6 +173,7 @@ class PCEClient():
         if not onramp_base_dir.endswith('onramp'):
             return (-1, 'Bad onramp_base_dir: Should end with "onramp"')
 
+        token_preamble = 'Access token: '
         child = pxssh.pxssh()
         try:
             child.login(hostname, unix_user, unix_password, port=ssh_port)
@@ -180,21 +181,24 @@ class PCEClient():
             child.prompt()
             child.before
             child.sendline('bin/onramp_pce_service.py gentoken')
+            child.before
             result = child.expect([
                 'Access token: .*',
                 'Exceeded max attempts at token generation',
                 'Access token file "src/pce_client.pwd" has been corrupted',
-                '.*'
             ])
 
+            if result == 0:
+                content = child.after
+                token = content.split(token_preamble)[1].strip()
+                child.logout()
+                return (0, token)
             if result == 1 or result == 2:
                 child.logout()
                 return (-2, 'PCE user registration sys error')
             if result == 3:
                 child.logout()
                 return (-4, 'Unknown error occured during user registration')
-
-            token = child.after.split(token_preamble)[1]
 
         except pexpect.exceptions.EOF:
             child.logout()
@@ -203,9 +207,6 @@ class PCEClient():
             child.logout()
             return (-4, 'Unknown error occured during user registration')
             
-        child.logout()
-        return (0, token)
-
     def __init__(self, logger, cert_dir, pce_hostname, pce_port, pce_id,
     			 access_token):
         """Initialize PCEClient instance.
