@@ -54,8 +54,6 @@ if __name__ == '__main__':
     # onramp_pce_config.cfg.
     conf = {
         'global': {
-            'server.socket_host': socket.gethostbyname(socket.gethostname()),
-            #'server.ssl_module': 'builtin',
             'server.ssl_certificate': '/home/dan/onramp/pce/src/keys/onramp_pce.crt',
             'server.ssl_private_key': '/home/dan/onramp/pce/src/keys/onramp_pce.key',
             'log.access_file': 'log/access.log',
