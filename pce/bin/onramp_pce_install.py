@@ -98,7 +98,9 @@ if __name__ == '__main__':
             if response is 'I' or response is 'i':
                 altname = raw_input('IP address: ')
                 num_ips += 1
+                num_hostnames += 1
                 alt_names.append('IP.%d = %s' % (num_ips, altname))
+                alt_names.append('DNS.%d = %s' % (num_hostnames, altname))
             elif response is 'H' or response is 'h':
                 altname = raw_input('Hostname: ')
                 num_hostnames += 1
@@ -114,6 +116,7 @@ if __name__ == '__main__':
 
         if alt_names:
             ssl_conf += '\n'.join(alt_names)
+            ssl_conf += '\n'
 
         with open(os.path.join('src', 'openssl.cnf'), 'w') as f:
             f.write(ssl_conf)
