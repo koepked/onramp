@@ -74,6 +74,10 @@ class PCEAccess():
             os.makedirs(self._pce_module_dir)
         if not os.path.exists(self._pce_job_dir):
             os.makedirs(self._pce_job_dir)
+    
+    def retrieve_cert(self, url, username, password):
+        result = self._client.retrieve_cert(url, username, password)
+        self._logger.debug('retrieve_cert result: %s' % result[1])
 
     def get_modules_avail(self):
         """Return the list of modules that are available at the PCE but not

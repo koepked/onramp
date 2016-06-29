@@ -1551,6 +1551,9 @@ class Admin(_ServerResourceBase):
                     self._pces[pce_id] = onramppce.PCEAccess(self.logger,
                                             self._db, pce_id, self._tmp_dir,
                                             access_token)
+                    self._pces[pce_id].retrieve_cert(data['url'],
+                                        data['pce_username'],
+                                        data['pce_password'])
                     self._pces[pce_id].establish_connection()
                 else:
                     self.logger.error('%s %s' % (prefix, reg_result[1]))

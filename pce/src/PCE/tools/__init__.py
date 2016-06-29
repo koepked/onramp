@@ -223,6 +223,83 @@ class PCEClient():
         self._access_token = access_token
         self._url = "https://%s:%d" % (pce_hostname, pce_port)
 
+    def retrieve_cert(self, hostname, unix_user, unix_password, ssh_port=22,
+                      onramp_base_dir=None):
+        """Retrieve, via SSH, the SSL certificate used by the given PCE.
+
+        Supports both password and pubkey SSH auth, however, cannot anticipate
+        which prior to call, thus, the unix_password arg will be submitted for
+        pubkey passphrase if requested, or for the account password if
+        requested.
+
+        Upon return, the retrieved SSL cert will be stored at cert_filename.
+
+        Args:
+            hostname (str): Hostname/IP of the PCE.
+            unix_user (str): Username of account with SSH access to PCE host
+                and read access to the PCE OnRamp files.
+            unix_password (str): Unix account password or pubkey passphrase for
+                unix_user.
+
+        Kwargs:
+            ssh_port (int): PCE SSH daemon port.
+            onramp_base_dir (str): Root dir of OnRamp installation on PCE. If
+                'None', a default of '/home/%s/onramp' % unix_user is used.
+
+        Returns:
+            One of the following tuples:
+                (0, 'Success')
+                (-1, 'Bad onramp_base_dir: Should end with "onramp"')
+                (-2, 'Unexpected output when attempting to transfer cert')
+                (-3, 'Incorrect username/password given')
+                (-4, 'Connection refused')
+        """
+
+        if not onramp_base_dir:
+            onramp_base_dir = '/home/%s/onramp' % unix_user
+
+        while onramp_base_dir.endswith('/'):
+            onramp_base_dir = onramp_base_dir[:-1]
+        if not onramp_base_dir.endswith('onramp'):
+            return (-1, 'Bad onramp_base_dir: Should end with "onramp"')
+
+        # Retrieve SSL cert from PCE.
+        command = ('scp '
+            '-o StrictHostKeyChecking=no '
+            '-P %d '
+            '%s@%s:%s'
+            '/pce/src/keys/onramp_pce.crt '
+            '%s'
+            % (ssh_port, unix_user, hostname, onramp_base_dir, 
+               self._get_cert_filename())
+        )
+        self._logger.debug('Command: %s' % str(command))
+        child = pexpect.spawn(command)
+        result = child.expect(['Password:', 'password:', 'Enter passphrase',
+                               'onramp_pce.crt', 'Connection refused'])
+
+        if result in [0,1,2]:
+            child.sendline(unix_password)
+            result = child.expect(['onramp_pce.crt', 'Password:', 'password:',
+                                   'Enter passphrase'])
+
+            if result == 0:
+                child.read()
+            elif result in [1,2,3]:
+                return (-3, 'Incorrect username/password given')
+            else:
+                return (-2, 'Unexpected output when attempting to transfer cert')
+
+        elif result == 3:
+            child.read()
+        elif result == 4:
+            return (-4, 'Connection refused')
+
+        else:
+            return (-2, 'Unexpected output when attempting to transfer cert')
+
+        return (0, 'Success')
+
     def _pce_get(self, endpoint, **kwargs):
         """Execute GET request to PCE endpoint.
 
@@ -368,83 +445,6 @@ class PCEClient():
 
     def get_url(self):
         return self._url
-
-    def retrieve_cert(self, hostname, ssh_port, unix_user, unix_password,
-               onramp_base_dir=None):
-        """Retrieve, via SSH, the SSL certificate used by the given PCE.
-
-        Supports both password and pubkey SSH auth, however, cannot anticipate
-        which prior to call, thus, the unix_password arg will be submitted for
-        pubkey passphrase if requested, or for the account password if
-        requested.
-
-        Upon return, the retrieved SSL cert will be stored with the filename
-        returned by self._get_cert_filename().
-
-        Args:
-            hostname (str): Hostname/IP of the PCE.
-            ssh_port (int): PCE SSH daemon port.
-            unix_user (str): Username of account with SSH access to PCE host
-                and read access to the PCE OnRamp files.
-            unix_password (str): Unix account password or pubkey passphrase for
-                unix_user.
-
-        Kwargs:
-            onramp_base_dir (str): Root dir of OnRamp installation on PCE. If
-                'None', a default of '/home/%s/onramp' % unix_user is used.
-
-        Returns:
-            One of the following tuples:
-                (0, 'Success')
-                (-1, 'Bad onramp_base_dir: Should end with "onramp"')
-                (-2, 'Unexpected output when attempting to transfer cert')
-                (-3, 'Incorrect username/password given')
-                (-4, 'Connection refused')
-        """
-
-        if not onramp_base_dir:
-            onramp_base_dir = '/home/%s/onramp' % unix_user
-
-        while onramp_base_dir.endswith('/'):
-            onramp_base_dir = onramp_base_dir[:-1]
-        if not onramp_base_dir.endswith('onramp'):
-            return (-1, 'Bad onramp_base_dir: Should end with "onramp"')
-
-        # Retrieve SSL cert from PCE.
-        command = ('scp '
-            '-o StrictHostKeyChecking=no '
-            '-P %d '
-            '%s@%s:%s'
-            '/pce/src/keys/onramp_pce.crt '
-            '%s'
-            % (ssh_port, unix_user, hostname, onramp_base_dir,
-               self._get_cert_filename())
-        )
-        child = pexpect.spawn(command)
-        result = child.expect(['Password:', 'password:', 'Enter passphrase',
-                               'onramp_pce.crt', 'Connection refused'])
-
-        if result in [0,1,2]:
-            child.sendline(unix_password)
-            result = child.expect(['onramp_pce.crt', 'Password:', 'password:',
-                                   'Enter passphrase'])
-
-            if result == 0:
-                child.read()
-            elif result in [1,2,3]:
-                return (-3, 'Incorrect username/password given')
-            else:
-                return (-2, 'Unexpected output when attempting to transfer cert')
-
-        elif result == 3:
-            child.read()
-        elif result == 4:
-            return (-4, 'Connection refused')
-
-        else:
-            return (-2, 'Unexpected output when attempting to transfer cert')
-
-        return (0, 'Success')
 
     def get_modules_avail(self):
         """Return the list of modules that are available at the PCE but not
